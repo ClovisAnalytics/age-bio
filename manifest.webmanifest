@@ -1,0 +1,12 @@
+{
+  "name": "Âge bio",
+  "short_name": "Âge bio",
+  "description": "Âge biologique, rythme de vieillissement et sommeil, calculés sur le téléphone.",
+  "lang": "fr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#111518",
+  "background_color": "#111518"
+}

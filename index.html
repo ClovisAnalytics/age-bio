@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data:; style-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#111518" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f3f4f5" media="(prefers-color-scheme: light)">
+  <title>Âge bio</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="app">
+  <p id="demo-banner" class="demo-banner" hidden>DONNÉES DE DÉMONSTRATION</p>
+
+  <main id="main">
+    <!-- Synchro : entrée de l'app (choix de l'export, lecture, analyse, révélation). -->
+    <section id="v-synchro" class="view view-sync" data-screen="synchro" aria-labelledby="sync-title">
+      <h1 id="sync-title" class="visually-hidden" tabindex="-1">Synchro</h1>
+      <div class="sync-stage">
+        <div id="sync-ring" class="sync-ring" aria-hidden="true"></div>
+        <p id="sync-lede" class="sync-lede">Ton âge bio, calculé sur place.<br>Rien n'est envoyé ni conservé.</p>
+        <ol id="sync-steps" class="sync-steps" hidden></ol>
+        <p id="sync-status" class="sync-status" role="status" aria-live="polite">Démarrage… Si ce message reste affiché, recharge la page.</p>
+        <div id="sync-actions" class="sync-actions">
+          <button id="sync-go" class="btn btn-primary" type="button" disabled>Synchroniser</button>
+          <p class="sync-hint">Export Gadgetbridge · dossier Documents</p>
+          <p class="sync-links"><a href="?demo">Voir la démo</a><span aria-hidden="true">·</span><a href="#methode">Comment ça marche</a></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Onglets et écrans de détail : contenu rendu par app.js. -->
+    <section id="v-aujourdhui" class="view view-tab" data-screen="aujourdhui" hidden></section>
+    <section id="v-age" class="view view-tab view-age" data-screen="age" hidden></section>
+    <section id="v-plus" class="view view-tab" data-screen="plus" hidden></section>
+    <section id="v-indicateur" class="view view-detail" data-screen="indicateur" hidden></section>
+    <section id="v-sommeil" class="view view-detail" data-screen="sommeil" hidden></section>
+    <section id="v-tendance" class="view view-detail" data-screen="tendance" hidden></section>
+
+    <!-- Méthode : texte fixe ; barèmes générés depuis CONFIG (calc.js) par app.js. -->
+    <section id="v-methode" class="view view-detail" data-screen="methode" aria-labelledby="method-title" hidden>
+      <header class="topbar">
+        <button class="icon-btn" type="button" data-back aria-label="Retour"></button>
+        <div class="topbar-center">
+          <h1 id="method-title" class="topbar-title" tabindex="-1">Méthode</h1>
+          <p id="method-sub" class="topbar-sub">Barèmes, sources, version</p>
+        </div>
+        <span class="topbar-slot"></span>
+      </header>
+      <div class="page prose">
+        <p class="notice">Estimation personnelle fondée sur la littérature scientifique. Pas un avis médical.</p>
+
+        <h2>Âge bio</h2>
+        <p>Âge bio = âge civil + somme des impacts de 9 indicateurs mesurés sur 6 mois (182 jours). L'impact d'un indicateur vaut 10 × ln(RR) années, où RR est le risque relatif de mortalité toutes causes face à sa valeur neutre : chaque année d'âge augmente ce risque d'environ 10 %. Il vaut 0 à la valeur neutre ; les barèmes sont plus bas. Les seuils neutres, la conversion et la cadence suivent la méthode publiée d'un bracelet du commerce (livre blanc révisé le 4/9/2025).</p>
+
+        <h2>Cadence</h2>
+        <p>La valeur officielle se calcule chaque dimanche, après la nuit du samedi : jours du dimanche − 182 à la veille, nuits jusqu'au dimanche. Elle se débloque avec au moins 21 nuits valides sur les 31 derniers jours ; en dessous, la dernière valeur reste affichée, en pause. Tant que la fenêtre compte moins de 90 jours valides, l'âge bio est en calibrage : il bouge davantage.</p>
+        <p>L'aperçu du jour refait le même calcul avec les données jusqu'à aujourd'hui : il annonce la valeur du dimanche suivant sans la remplacer.</p>
+
+        <h2>Jours, nuits, indicateurs</h2>
+        <p>Un jour est valide s'il compte au moins 16 h avec une fréquence cardiaque mesurée ; une nuit, si elle compte au moins 3 h de sommeil. Un jour ou une nuit sans données est ignoré, jamais compté à zéro. Un indicateur qui a moins de 7 points sur la période est absent : impact nul. Valeurs hebdomadaires : somme sur les jours valides ÷ nombre de jours valides × 7.</p>
+
+        <h2>Rythme de vieillissement</h2>
+        <p>Rythme = 1 + 2 × (G30 − G182), borné de −1 à 3, où G182 et G30 sont les écarts à l'âge civil calculés sur 182 et 30 jours (un indicateur absent sur 30 jours garde sa valeur sur 182). Si les habitudes des 30 derniers jours durent six mois, l'âge bio avance de 0,5 × rythme an pendant ces six mois : 1,0x suit le temps, 0x le fige, une valeur négative le fait baisser.</p>
+
+        <h2>Indicateurs et barèmes</h2>
+        <p id="method-ctx" class="note">Interpolation linéaire entre les points, valeur constante au-delà.</p>
+        <ul id="method-scales" class="scales"></ul>
+        <p class="note">M3 et M4 : minutes en zones cardiaques pendant une activité (séance enregistrée, ou au moins 15 minutes d'affilée au-dessus de la zone 1). Zones en % de la réserve cardiaque, FC de repos + p × (FC max − FC de repos) : zones 1 à 3 de 50 à 80 %, zones 4 et 5 au-delà ; FC max = 208 − 0,7 × âge. M2 : chaque nuit, écart des heures de coucher et de lever avec les 4 nuits précédentes, les plus récentes pesant plus ; 2 h d'écart moyen donnent 0 %. M8 : moyenne de la moitié la plus basse des fréquences cardiaques de chaque nuit. M7 : VO2 max mesurée par le bracelet pendant une course ou une marche en extérieur ; sans mesure, une estimation sans effort est affichée pour information, sans effet sur l'âge bio (elle recompte la FC de repos et l'activité). M9 : la masse maigre n'est mesurée ni par le bracelet ni par Gadgetbridge : sans effet.</p>
+
+        <h2>Leviers et précision</h2>
+        <p>Leviers : années gagnées si un comportement progresse d'un pas réaliste (30 min de sommeil par nuit, 10 points de régularité, 30 min d'activité modérée ou 10 min d'activité vigoureuse par semaine, 20 min de renforcement par semaine, 1 000 pas par jour), avec les mêmes barèmes. Ce sont des estimations, pas une promesse.</p>
+        <p>Précision : l'incertitude de chaque indicateur (variabilité des mesures ÷ √n) est convertie en années par la pente de son barème ; l'intervalle à 95 % vaut âge bio ± 1,96 × la racine de la somme des carrés.</p>
+
+        <h2>Sommeil</h2>
+        <p>La nuit du jour J regroupe les sessions qui commencent entre la veille 18 h et 6 h, plus celles qui commencent moins de 60 minutes après la fin de la précédente ; les autres (siestes) sont ignorées. Sommeil effectif = profond + léger + paradoxal ; à défaut, total − éveil ; à défaut, durée de la session (bracelet sans détail).</p>
+        <p>Performance = sommeil ÷ 8 h. Efficacité = sommeil ÷ temps entre coucher et lever. Réparateur = (profond + paradoxal) ÷ sommeil. Repères Faible · Suffisant · Optimal : performance &lt; 70 % · 70 à 85 % · ≥ 85 % ; régularité &lt; 70 % · 70 à 85 % · ≥ 85 % ; efficacité &lt; 80 % · 80 à 90 % · ≥ 90 % ; réparateur &lt; 30 % · 30 à 40 % · ≥ 40 %.</p>
+
+        <h2>Sources</h2>
+        <ul class="sources">
+          <li>Paluch AE et al. Daily steps and all-cause mortality: a meta-analysis of 15 international cohorts. Lancet Public Health 2022;7(3):e219–e228.</li>
+          <li>Kodama S et al. Cardiorespiratory fitness as a quantitative predictor of all-cause mortality and cardiovascular events in healthy men and women. JAMA 2009;301(19):2024–2035.</li>
+          <li>Zhang D et al. Resting heart rate and all-cause and cardiovascular mortality in the general population: a meta-analysis. CMAJ 2016;188(3):E53–E63.</li>
+          <li>Yin J et al. Relationship of sleep duration with all-cause mortality and cardiovascular events. J Am Heart Assoc 2017;6(9):e005947.</li>
+          <li>Windred DP et al. Sleep regularity is a stronger predictor of mortality risk than sleep duration. Sleep 2024;47(1):zsad253.</li>
+          <li>Arem H et al. Leisure time physical activity and mortality: a detailed pooled analysis of the dose-response relationship. JAMA Intern Med 2015;175(6):959–967.</li>
+          <li>Wang Y et al. Association of physical activity intensity with mortality. JAMA Intern Med 2021;181(2):203–211.</li>
+          <li>Momma H et al. Muscle-strengthening activities are associated with lower risk and mortality in major non-communicable diseases. Br J Sports Med 2022;56(13):755–763.</li>
+          <li>Jurca R et al. Assessing cardiorespiratory fitness without performing exercise testing. Am J Prev Med 2005;29(3):185–193.</li>
+          <li>Karvonen MJ et al. The effects of training on heart rate: a longitudinal study. Ann Med Exp Biol Fenn 1957;35(3):307–315.</li>
+          <li>Tanaka H et al. Age-predicted maximal heart rate revisited. J Am Coll Cardiol 2001;37(1):153–156.</li>
+          <li>OMS. Lignes directrices sur l'activité physique et la sédentarité, 2020.</li>
+        </ul>
+        <p id="method-version" class="note"></p>
+      </div>
+    </section>
+
+    <!-- Diagnostic : structure et couverture de l'export, jamais une valeur de santé ni le profil. -->
+    <section id="v-diagnostic" class="view view-detail" data-screen="diagnostic" aria-labelledby="diag-title" hidden>
+      <header class="topbar">
+        <button class="icon-btn" type="button" data-back aria-label="Retour"></button>
+        <div class="topbar-center">
+          <h1 id="diag-title" class="topbar-title" tabindex="-1">Diagnostic</h1>
+          <p class="topbar-sub">À transmettre tel quel</p>
+        </div>
+        <span class="topbar-slot"></span>
+      </header>
+      <div class="page">
+        <p class="lead">Structure et couverture des données seulement, aucune valeur de santé ni ton profil : tu peux le transmettre tel quel.</p>
+        <button id="copy" class="btn btn-primary" type="button" disabled>Copier le diagnostic</button>
+        <pre id="diag-text" class="diag" tabindex="0" aria-label="Texte du diagnostic">Aucun export chargé.</pre>
+      </div>
+    </section>
+  </main>
+
+  <!-- En-tête compact de l'écran Âge bio (apparaît au défilement ; doublon visuel, masqué aux lecteurs d'écran). -->
+  <div id="compact" class="compact" aria-hidden="true"></div>
+
+  <nav id="tabbar" class="tabbar" aria-label="Navigation principale" hidden>
+    <div class="tabs">
+      <a class="tab" href="#aujourdhui" data-tab="aujourdhui"><span class="tab-icon" data-icon="today"></span><span class="tab-label">Aujourd'hui</span></a>
+      <a class="tab" href="#age" data-tab="age"><span class="tab-icon" data-icon="orb"></span><span class="tab-label">Âge bio</span></a>
+      <a class="tab" href="#plus" data-tab="plus"><span class="tab-icon" data-icon="more"></span><span class="tab-label">Plus</span></a>
+    </div>
+    <button id="fab-sync" class="fab" type="button" aria-label="Nouvelle synchro : choisir un export"><span class="fab-ring" data-icon="sync"></span></button>
+  </nav>
+
+  <!-- Feuille du bas (fiches d'explication). -->
+  <div id="sheet-root" class="sheet-root" hidden>
+    <div class="sheet-backdrop" data-close></div>
+    <section id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" tabindex="-1">
+      <div class="sheet-grip" aria-hidden="true"><span></span></div>
+      <header class="sheet-head">
+        <h2 id="sheet-title" class="sheet-title"></h2>
+        <button class="icon-btn" type="button" data-close data-icon="close" aria-label="Fermer"></button>
+      </header>
+      <div id="sheet-body" class="sheet-body"></div>
+    </section>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <p id="live" class="visually-hidden" aria-live="polite"></p>
+  <input id="file" type="file" hidden>
+  <noscript><p class="noscript">Âge bio a besoin de JavaScript pour lire l'export.</p></noscript>
+  <script src="sql-wasm.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
