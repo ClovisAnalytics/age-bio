@@ -59,6 +59,10 @@
         <p>La valeur officielle se calcule chaque dimanche, après la nuit du samedi : jours du dimanche − 182 à la veille, nuits jusqu'au dimanche. Elle se débloque avec au moins 21 nuits valides sur les 31 derniers jours ; en dessous, la dernière valeur reste affichée, en pause. Tant que la fenêtre compte moins de 90 jours valides, l'âge bio est en calibrage : il bouge davantage.</p>
         <p>L'aperçu du jour refait le même calcul avec les données jusqu'à aujourd'hui : il annonce la valeur du dimanche suivant sans la remplacer.</p>
 
+        <h2>Valeur provisoire et fiabilité</h2>
+        <p>Avant la première valeur officielle, l'âge bio s'affiche quand même, en valeur provisoire : le calcul de l'aperçu du jour, dès la première nuit ou journée valide. Les indicateurs quotidiens (M1, M2, M6, M8) y comptent dès 1 point ; les valeurs hebdomadaires (M3, M4, M5) attendent 7 jours valides. Le rythme et les moyennes sur 30 jours n'apparaissent qu'au-delà de 30 jours de données.</p>
+        <p>Fiabilité = moyenne, sur les 6 indicateurs mesurés en continu (M1, M2, M3, M4, M6, M8), de √(min(n, 90) ÷ 90), où n est le nombre de points de l'indicateur dans la fenêtre (0 s'il est absent). L'erreur type d'une moyenne décroît en 1/√n : c'est la précision atteinte, rapportée à celle du calibrage complet. Environ 28 % après une semaine, 48 % à 21 nuits, 100 % à 90 jours. M5 et M7 dépendent de séances enregistrées et M9 n'est pas mesurée : ils n'entrent pas dans la fiabilité.</p>
+
         <h2>Jours, nuits, indicateurs</h2>
         <p>Un jour est valide s'il compte au moins 16 h avec une fréquence cardiaque mesurée ; une nuit, si elle compte au moins 3 h de sommeil. Un jour ou une nuit sans données est ignoré, jamais compté à zéro. Un indicateur qui a moins de 7 points sur la période est absent : impact nul. Valeurs hebdomadaires : somme sur les jours valides ÷ nombre de jours valides × 7.</p>
 

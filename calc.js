@@ -10,7 +10,7 @@
 const G = 10;   // années par unité de ln(HR) : t = 10 × ln(HR), « roughly 10% increase in risk » par année (C, WP p. 12)
 
 export const CONFIG = {
-  METHOD_VERSION: '2.0',
+  METHOD_VERSION: '2.1',
 
   // ---------- Lecture ----------
   HR_VALID: [30, 220],          // FC valide si 30 ≤ HEART_RATE ≤ 220 (0, 255 et négatifs = pas de mesure)
@@ -38,6 +38,17 @@ export const CONFIG = {
   UNLOCK_SPAN: 31,              // …parmi les 31 clés de nuit S−30 … S
   CALIBRATION_DAYS: 90,         // calibrage complet à 90 jours valides (C : « full calibration happening at 90 days »)
   PACE_BOUNDS: [-1, 3],         // C, WP p. 19
+
+  // ---------- Valeur provisoire et fiabilité (choix du projet, absents du WP) ----------
+  // Sans valeur officielle, l'âge bio s'affiche quand même : calcul de l'aperçu du jour sur les données disponibles, où
+  // les indicateurs quotidiens (M1, M2, M6, M8) comptent dès 1 point ; les valeurs hebdomadaires (M3, M4, M5) gardent
+  // 7 jours valides, une semaine entière (D : un échantillon de quelques jours dépend trop des jours tirés).
+  PROVISIONAL_MIN_POINTS: 1,
+  // Fiabilité (0 à 1) : moyenne, sur les 6 indicateurs que le bracelet mesure en continu, de √(min(n, N) / N), n = points
+  // de l'indicateur dans la fenêtre (0 s'il est absent), N = CALIBRATION_DAYS. L'erreur type d'une moyenne varie en
+  // 1/√n : c'est la précision atteinte rapportée à celle du calibrage complet (D). M5 et M7 dépendent de séances
+  // enregistrées, M9 n'est pas mesurée : hors fiabilité.
+  RELIABILITY_IDS: ['M1', 'M2', 'M3', 'M4', 'M6', 'M8'],
 
   // ---------- M2 Régularité ----------
   // Nuit D comparée aux nuits valides D−1 … D−4 (C : « compared to the previous 4 days », WP p. 21),
@@ -829,10 +840,12 @@ export function buildModel(base, opts = {}) {
 const statOf = values => ({ n: values.length, value: mean(values), se: values.length ? stdev(values) / Math.sqrt(values.length) : null });
 
 // Les 9 indicateurs sur la fenêtre de n jours finissant au jour endKey ; nuits de n clés finissant à nightEndKey.
+// opts.dailyMin : minimum de points des indicateurs quotidiens (M1, M2, M6, M8), CONFIG.MIN_POINTS par défaut.
 // Renvoie { startKey, endKey, nightStartKey, nightEndKey, validDays, validNights, restMean, ind, gap }.
 // ind[id] = { id, value, points, delta, present, estimated, reason, se } (+ undated pour M5, level pour M7 estimée).
-export function windowIndicators(m, endKey, n, nightEndKey = endKey) {
+export function windowIndicators(m, endKey, n, nightEndKey = endKey, opts = {}) {
   const base = m.base;
+  const daily = opts.dailyMin ?? CONFIG.MIN_POINTS;
   const startKey = addDays(endKey, -(n - 1));
   const nightStartKey = addDays(nightEndKey, -(n - 1));
   const days = base.dayList.filter(d => d.valid && d.key >= startKey && d.key <= endKey);
@@ -846,16 +859,18 @@ export function windowIndicators(m, endKey, n, nightEndKey = endKey) {
       ? { id, value, points, delta: delta(id, value, ctx), present: true, estimated: false, reason: null, se }
       : { id, value: null, points, delta: 0, present: false, estimated: false, reason, se: null };
   };
-  const fewDays = `${plural(nd, 'jour valide', 'jours valides')}, 7 requis`;
+  // Valeurs hebdomadaires (M3, M4, M5) : 7 jours valides, même quand la valeur provisoire abaisse le minimum quotidien.
+  const fewDays = `${plural(nd, 'jour valide', 'jours valides')}, ${CONFIG.MIN_POINTS} requis${daily < CONFIG.MIN_POINTS ? ' pour une valeur hebdomadaire' : ''}`;
+  const nightsNeeded = plural(daily, 'requise', 'requises');
   const weekly = values => {
     const s = statOf(values);
     return { n: s.n, value: s.value === null ? null : s.value * 7, se: s.se === null ? null : s.se * 7 };
   };
 
-  put('M1', statOf(nights.map(x => x.sleepMin / 60)), `${plural(nn, 'nuit valide', 'nuits valides')}, 7 requises`);
+  put('M1', statOf(nights.map(x => x.sleepMin / 60)), `${plural(nn, 'nuit valide', 'nuits valides')}, ${nightsNeeded}`, daily);
 
   const regs = nights.map(x => base.reg.get(x.key)).filter(v => v !== undefined);
-  put('M2', statOf(regs), `${plural(regs.length, 'nuit précédée', 'nuits précédées')} d'au moins 2 nuits valides sur les 4 précédentes, 7 requises`);
+  put('M2', statOf(regs), `${plural(regs.length, 'nuit précédée', 'nuits précédées')} d'au moins 2 nuits valides sur les 4 précédentes, ${nightsNeeded}`, daily);
 
   // FC de repos nocturnes de la fenêtre : M8, et repli des zones pour les jours sans nuit dans les 14 jours précédents.
   const rests = nights.map(x => m.nightRest.get(x.key)).filter(v => v !== undefined);
@@ -885,11 +900,11 @@ export function windowIndicators(m, endKey, n, nightEndKey = endKey) {
   }
   ind.M5.undated = undated;
 
-  put('M6', statOf(days.map(d => d.steps)), fewDays);
+  put('M6', statOf(days.map(d => d.steps)), `${plural(nd, 'jour valide', 'jours valides')}, ${daily} requis`, daily);
 
   put('M8', statOf(rests), m.hasHr
-    ? `${plural(rests.length, 'nuit', 'nuits')} avec FC de repos nocturne (au moins ${CONFIG.REST_MIN_SAMPLES} min de FC valide), 7 requises`
-    : 'FC absente de l\'export');
+    ? `${plural(rests.length, 'nuit', 'nuits')} avec FC de repos nocturne (au moins ${CONFIG.REST_MIN_SAMPLES} min de FC valide), ${nightsNeeded}`
+    : 'FC absente de l\'export', daily);
 
   // M7, voie 1 : VO2 max du bracelet (moyenne des mesures de la fenêtre, présente dès 1 mesure).
   const vo2 = [];
@@ -923,11 +938,12 @@ export function windowIndicators(m, endKey, n, nightEndKey = endKey) {
   return { startKey, endKey, nightStartKey, nightEndKey, validDays: nd, validNights: nn, restMean, ind: Object.fromEntries(IDS.map(id => [id, ind[id]])), gap };
 }
 
-// Valeur au jour X (dimanche ou aperçu) : jours X−182 … X−1, nuits X−181 … X ; rythme sur 30 jours.
-function evaluate(m, X) {
+// Valeur au jour X (dimanche, aperçu ou valeur provisoire) : jours X−182 … X−1, nuits X−181 … X ; rythme sur 30 jours.
+// opts : options de windowIndicators (dailyMin pour la valeur provisoire).
+function evaluate(m, X, opts = {}) {
   const dayEnd = addDays(X, -1);
-  const w182 = windowIndicators(m, dayEnd, CONFIG.AGE_WINDOW_DAYS, X);
-  const w30 = windowIndicators(m, dayEnd, CONFIG.PACE_WINDOW_DAYS, X);
+  const w182 = windowIndicators(m, dayEnd, CONFIG.AGE_WINDOW_DAYS, X, opts);
+  const w30 = windowIndicators(m, dayEnd, CONFIG.PACE_WINDOW_DAYS, X, opts);
   const civil = m.ageAt(dayEnd);
   // G30 : un indicateur absent sur 30 jours reprend sa contribution sur 182 jours.
   const g30 = IDS.reduce((a, id) => a + (w30.ind[id].present ? w30.ind[id].delta : w182.ind[id].delta), 0);
@@ -935,18 +951,33 @@ function evaluate(m, X) {
   return { key: X, civil, bio: civil + w182.gap, gap: w182.gap, g30, pace, w182, w30, calibrating: w182.validDays < CONFIG.CALIBRATION_DAYS };
 }
 
-// Indicateurs de la sortie (lus par l'interface).
-function indicatorsOf(e, ctx) {
+// Fiabilité d'une fenêtre : score de 0 à 1 (CONFIG.RELIABILITY_IDS), indicateurs mesurés, jours et nuits valides.
+export function reliabilityOf(w) {
+  const full = CONFIG.CALIBRATION_DAYS;
+  const ids = CONFIG.RELIABILITY_IDS;
+  const points = id => (w.ind[id].present ? w.ind[id].points : 0);
+  return {
+    score: ids.reduce((a, id) => a + Math.sqrt(Math.min(points(id), full) / full), 0) / ids.length,
+    measured: ids.filter(id => w.ind[id].present).length,
+    of: ids.length,
+    validDays: w.validDays,
+    validNights: w.validNights,
+  };
+}
+
+// Indicateurs de la sortie (lus par l'interface). recent = false : pas de moyenne 30 jours (moins de 30 jours de données).
+function indicatorsOf(e, ctx, { recent = true } = {}) {
   return IDS.map(id => {
     const a = e.w182.ind[id];
     const b = e.w30.ind[id];
-    const shown30 = b.present || (b.estimated && b.value !== null);
+    const shown30 = recent && (b.present || (b.estimated && b.value !== null));
     return {
       id,
       group: GROUPS[id],
       present: a.present,
       estimated: a.estimated,
       reason: a.reason,
+      points: a.points,
       value6m: a.value,
       value30: shown30 ? b.value : null,
       delta: a.delta,
@@ -1001,7 +1032,7 @@ function nightScores(base, x) {
   };
 }
 
-// Étape 2 : valeur officielle du dimanche, aperçu, courbe, leviers, sommeil, 7 derniers jours.
+// Étape 2 : valeur officielle du dimanche, aperçu, valeur provisoire, courbe, leviers, sommeil, 7 derniers jours.
 // opts : { profile: { birth, gender, height, weight }, hasHr, nightRest: Map, active: [{ t, hr }] }
 export function analyze(base, opts = {}) {
   const m = buildModel(base, opts);
@@ -1019,6 +1050,7 @@ export function analyze(base, opts = {}) {
     unlock: { nightsIn31: 0, needed: CONFIG.UNLOCK_NIGHTS, nightsToGo: CONFIG.UNLOCK_NIGHTS, everUnlocked: false },
     official: null,
     preview: null,
+    provisional: null,
     levers: [],
     curve: [],
     sleep: { last: null, avg7: null },
@@ -1059,6 +1091,7 @@ export function analyze(base, opts = {}) {
       gap: e.gap,
       pace: e.pace,
       calibrating: e.calibrating,
+      reliability: reliabilityOf(e.w182).score,
       values: Object.fromEntries(IDS.map(id => [id, e.w182.ind[id].value])),
       deltas: Object.fromEntries(IDS.map(id => [id, e.w182.ind[id].delta])),
     }));
@@ -1084,6 +1117,7 @@ export function analyze(base, opts = {}) {
         pace: { value: e.pace, state: paceState(e.pace), g30: e.g30, g182: e.gap, prev },
         nextUpdateDays: daysToNextUpdate(L),
         interval: precisionOf(e, ctx),
+        reliability: reliabilityOf(e.w182),
         window: e.w182,
         window30: e.w30,
         indicators: indicatorsOf(e, ctx),
@@ -1097,7 +1131,30 @@ export function analyze(base, opts = {}) {
       shown ??= e;
     }
 
-    // ---- Leviers : sur la valeur officielle (sinon l'aperçu) ----
+    // ---- Valeur provisoire : tant qu'il n'y a pas de valeur officielle, l'âge bio du jour, avec sa fiabilité ----
+    // Indicateurs quotidiens dès 1 point ; rythme et moyennes 30 jours seulement au-delà de 30 jours de données.
+    if (!out.official) {
+      const e = evaluate(m, L, { dailyMin: CONFIG.PROVISIONAL_MIN_POINTS });
+      const reliability = reliabilityOf(e.w182);
+      if (reliability.measured > 0) {
+        const ctx = { age: e.civil, gender: m.gender };
+        const recent = dayDiff(first, L) > CONFIG.PACE_WINDOW_DAYS;
+        out.provisional = {
+          key: L,
+          civil: e.civil,
+          bio: e.bio,
+          gap: e.gap,
+          ageState: ageState(e.gap),
+          pace: recent ? { value: e.pace, state: paceState(e.pace), g30: e.g30, g182: e.gap } : null,
+          reliability,
+          window: e.w182,
+          indicators: indicatorsOf(e, ctx, { recent }),
+        };
+        shown = e;
+      }
+    }
+
+    // ---- Leviers : sur la valeur officielle (sinon l'aperçu, sinon la valeur provisoire) ----
     if (shown) out.levers = leversOf(shown, { age: shown.civil, gender: m.gender });
   }
 
@@ -1147,7 +1204,7 @@ export function analyze(base, opts = {}) {
 
 // ================= Export Gadgetbridge : tables et codes =================
 
-export const APP_VERSION = '2.0.2';
+export const APP_VERSION = '2.1.0';
 
 // Tables lues (schéma Gadgetbridge 160, GBDaoGenerator.java).
 const T_ACT = 'XIAOMI_ACTIVITY_SAMPLE';
@@ -2022,11 +2079,21 @@ export function calcDiagnostic(data) {
   const u = r.unlock;
   if (u) lines.push(`  Déblocage : ${fmt(u.nightsIn31)} nuits valides sur les ${CONFIG.UNLOCK_SPAN} dernières (${u.needed} requises) · déjà débloqué : ${yesNo(u.everUnlocked)}`);
   const o = r.official;
+  const rel = x => `${Math.round(x.reliability.score * 100)} % (${x.reliability.measured}/${x.reliability.of} indicateurs continus)`;
+  const presence = x => x.indicators.map(i => `${i.id} ${i.present ? 'oui' : i.estimated ? 'estimé' : 'non'}`);
   if (o) {
     lines.push(`  Valeur officielle : dimanche ${dmy(o.key)}${o.paused ? `, en pause (dernier dimanche ${dmy(o.lastSunday)} : ${fmt(o.nightsIn31)} nuits sur ${CONFIG.UNLOCK_SPAN})` : ''} · calibrage : ${yesNo(o.calibrating)} · mise à jour dans ${plural(o.nextUpdateDays, 'jour')}`);
-    lines.push(wrap('  Indicateurs (182 j) : ', o.indicators.map(x => `${x.id} ${x.present ? 'oui' : x.estimated ? 'estimé' : 'non'}`)));
+    lines.push(`  Fiabilité : ${rel(o)}`);
+    lines.push(wrap('  Indicateurs (182 j) : ', presence(o)));
   } else {
     lines.push(`  Valeur officielle : aucune${data.usable ? '' : ' (profil inutilisable)'}`);
+  }
+  const p = r.provisional;
+  if (p) {
+    lines.push(`  Valeur provisoire : oui · fiabilité ${rel(p)} · rythme : ${yesNo(p.pace)}`);
+    lines.push(wrap('  Indicateurs : ', presence(p)));
+  } else if (!o) {
+    lines.push('  Valeur provisoire : non (ni nuit ni jour valide exploitable)');
   }
   lines.push(`  Aperçu quotidien : ${yesNo(r.preview)} · points de courbe : ${fmt(r.curve?.length ?? 0)} · leviers : ${fmt(r.levers?.length ?? 0)}`);
   return lines.join('\n');
@@ -2216,7 +2283,7 @@ export const DEMO_SCENARIOS = ['complet', 'nouveau', 'pause'];
 // - 'complet' : 200 jours ; séances de renforcement (musculation, HIIT, yoga) et de course (VO2 du bracelet dans
 //   certaines), marches soutenues hors séance, efforts trop courts (non comptés), nuits avec et sans stades, quelques
 //   jours non valides ; habitudes un peu meilleures sur les 30 derniers jours (rythme < 1).
-// - 'nouveau' : 10 nuits, pas encore débloqué.
+// - 'nouveau' : 10 nuits, pas encore débloqué : valeur provisoire et sa fiabilité.
 // - 'pause' : débloqué, puis moins de 21 nuits valides sur les 31 derniers jours (bracelet souvent retiré la nuit).
 export function buildDemo(SQL, now, timeZone, scenario = 'complet') {
   const name = scenario || 'complet';

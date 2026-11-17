@@ -21,7 +21,7 @@ Inspiration : WHOOP Age et Pace of Aging. Formule propre au projet, fondée sur 
 3. Gadgetbridge : Paramètres → *Automations* → **Run AutoExport now** (ou attendre l'export automatique).
 4. Dans l'app : **Synchroniser** → *Documents* → le fichier de l'export.
 
-L'âge bio officiel se calcule chaque dimanche et se débloque avec 21 nuits valides sur les 31 derniers jours. Démo : `index.html?demo` (ou `?demo=nouveau`, `?demo=pause`).
+L'âge bio s'affiche dès la première nuit ou journée valide, en valeur provisoire, avec un score de fiabilité qui grandit avec les données (100 % à 90 jours). La valeur officielle se calcule chaque dimanche et prend le relais avec 21 nuits valides sur les 31 derniers jours. Démo : `index.html?demo` (ou `?demo=nouveau`, `?demo=pause`).
 
 ## Mise en place de Gadgetbridge
 
