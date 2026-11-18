@@ -10,7 +10,7 @@
 const G = 10;   // années par unité de ln(HR) : t = 10 × ln(HR), « roughly 10% increase in risk » par année (C, WP p. 12)
 
 export const CONFIG = {
-  METHOD_VERSION: '2.1',
+  METHOD_VERSION: '2.2',
 
   // ---------- Lecture ----------
   HR_VALID: [30, 220],          // FC valide si 30 ≤ HEART_RATE ≤ 220 (0, 255 et négatifs = pas de mesure)
@@ -22,10 +22,9 @@ export const CONFIG = {
   NIGHT_FROM_HOUR: 18,          // nuit D : sessions commençant entre D-1 18:00…
   NIGHT_TO_HOUR: 6,             // …et D 06:00 (exclu)
   CHAIN_GAP_MIN: 60,            // chaînage : session commençant moins de 60 min après la fin de la précédente
-  VALID_NIGHT_MIN: 180,         // nuit valide : sommeil effectif ≥ 3 h
-  // Unité des durées de sommeil quand la détection automatique ne conclut pas.
-  // Source : SleepStagesParser (« total sleep duration in minutes ») ; à confirmer sur l'export réel.
-  SLEEP_DURATION_UNIT: 'min',
+  // Nuit valide : au moins 3 h de sessions. Le bracelet ne transmet que le début et la fin de chaque session (ni stades
+  // ni durées, export réel du 18/11/2026) : le sommeil d'une nuit est la durée de ses sessions.
+  VALID_NIGHT_MIN: 180,
 
   // ---------- Fenêtres ----------
   AGE_WINDOW_DAYS: 182,         // 6 mois (C, WP p. 18 : « based on the last 6 months of WHOOP data »)
@@ -47,7 +46,7 @@ export const CONFIG = {
   // Fiabilité (0 à 1) : moyenne, sur les 6 indicateurs que le bracelet mesure en continu, de √(min(n, N) / N), n = points
   // de l'indicateur dans la fenêtre (0 s'il est absent), N = CALIBRATION_DAYS. L'erreur type d'une moyenne varie en
   // 1/√n : c'est la précision atteinte rapportée à celle du calibrage complet (D). M5 et M7 dépendent de séances
-  // enregistrées, M9 n'est pas mesurée : hors fiabilité.
+  // enregistrées : hors fiabilité.
   RELIABILITY_IDS: ['M1', 'M2', 'M3', 'M4', 'M6', 'M8'],
 
   // ---------- M2 Régularité ----------
@@ -133,36 +132,21 @@ export const CONFIG = {
   },
 
   // ---------- M7, voie 1 : VO2 max du bracelet, comptée ----------
-  // RAW_SUMMARY_DATA = fichier de résumé reçu du bracelet (GB : XiaomiActivityFileId.from, WorkoutSummaryParser,
-  // XiaomiSimpleActivityParser, XiaomiActivityParser.fixAndWrap). Octets 0-3 : horodatage u32 LE (s) ; 4 : fuseau ;
-  // 5 : version ; 6 : drapeaux (type = bit 7, sous-type = (b & 0x7F) >> 2, détail = b & 3) ; 7 : 0 ; puis en-tête de
-  // validité, corps little-endian et CRC32 final. Ancien format (#3916, avant le 26/07/2024) : sans octet 7 ni CRC,
-  // reconnu au CRC invalide → positions décalées de −1. Positions comptées depuis le début du fichier (format actuel) :
-  // début de séance (u32, s), FC moyenne / max / min (u8), VO2 max (u8, ml/kg/min, 0 = absente).
-  // Clé : « sous-type/version ». Seuls ces couples sont lus.
+  // RAW_SUMMARY_DATA = fichier de résumé reçu du bracelet (GB : XiaomiActivityFileId.from, WorkoutSummaryParser).
+  // Octets 0-3 : horodatage u32 LE (s) ; 4 : fuseau ; 5 : version ; 6 : drapeaux (type = bit 7, sous-type =
+  // (b & 0x7F) >> 2, détail = b & 3) ; 7 : 0 ; corps little-endian ; CRC32 final.
+  // Course (0x01) et marche (0x02) en extérieur, version 4 : champs dans l'ordre de getOutdoorV3Parser(true) de GB à
+  // partir de l'octet 13 (le parseur v4 de GB ne correspond pas aux données, d'où une fin de séance négative et une
+  // VO2 jamais lue par GB) : début et fin (u32, s), FC moyenne / max / min (u8), VO2 max (u8, ml/kg/min, 0 = non
+  // calculée par le bracelet). Relevé sur l'export réel du 18/11/2026 : les 5 zones cardiaques (octets 80 à 99)
+  // totalisent la durée active de chaque séance ; VO2 lue sur une course de 15 min, 0 sur une marche et une course de 2 min.
+  // Clé : « sous-type/version ». Les autres résumés (musculation, HIIT…) n'ont pas de VO2.
   VO2_LAYOUTS: {
-    '22/2': { start: 16, hr: [58, 59, 60], vo2: 91 },    // 0x16 course, marche, randonnée, trail (getOutdoorWalkingV2Parser)
-    '22/4': { start: 17, hr: [59, 60, 61], vo2: 92 },
-    '22/5': { start: 19, hr: [73, 74, 75], vo2: 106 },
-    '22/6': { start: 19, hr: [73, 74, 75], vo2: 106 },
-    '22/9': { start: 23, hr: [77, 78, 79], vo2: 115 },
-    '23/4': { start: 16, hr: [52, 53, 54], vo2: 85 },    // 0x17 vélo extérieur (getOutdoorCyclingParser ; v7 non gérée)
-    '23/5': { start: 16, hr: [56, 57, 58], vo2: 89 },
-    '23/6': { start: 17, hr: [57, 58, 59], vo2: 90 },
-    '23/8': { start: 18, hr: [58, 59, 60], vo2: 96 },
-    '3/5': { start: 12, hr: [44, 45, 46], vo2: 51 },     // 0x03 tapis (getTreadmillParser)
-    '3/10': { start: 16, hr: [56, 57, 58], vo2: 64 },
-    '3/11': { start: 17, hr: [57, 58, 59], vo2: 65 },
-    '1/3': { start: 12, hr: [48, 49, 50], vo2: 75 },     // 0x01 course, v3 (getOutdoorV3Parser avec pas)
-    '2/3': { start: 12, hr: [48, 49, 50], vo2: 75 },     // 0x02 marche, v3
-    '6/3': { start: 12, hr: [42, 43, 44], vo2: 69 },     // 0x06 vélo, v3 (getOutdoorV3Parser sans pas)
+    '1/4': { start: 13, end: 17, hr: [49, 50, 51], vo2: 76 },
+    '2/4': { start: 13, end: 17, hr: [49, 50, 51], vo2: 76 },
   },
-  // Dispositions sans champ VO2 : sous-types 0x07 vélo d'intérieur, 0x08 libre (musculation comprise), 0x09 piscine,
-  // 0x0B elliptique, 0x0D rameur, 0x0E corde, 0x10 HIIT ; couples 0x16 v1, 0x01 v4, 0x02 v4, 0x03 v9, 0x06 v4.
-  VO2_NONE_SUBTYPES: [0x07, 0x08, 0x09, 0x0b, 0x0d, 0x0e, 0x10],
-  VO2_NONE_PAIRS: ['22/1', '1/4', '2/4', '3/9', '6/4'],
-  // Contrôles d'alignement (D) : début de séance du corps à moins d'un jour de l'horodatage du
-  // fichier ; 30 ≤ FC moyenne ≤ FC max ≤ 220 et FC min ≤ moyenne. Sinon la VO2 n'est pas lue.
+  // Contrôles d'alignement (D) : début de séance du corps à moins d'un jour de l'horodatage du fichier, fin ≥ début ;
+  // 30 ≤ FC moyenne ≤ FC max ≤ 220 et FC min ≤ moyenne. Sinon le résumé n'est pas lu.
   VO2_START_TOLERANCE_S: 86400,
   VO2_PLAUSIBLE: [15, 90],      // valeur retenue si 15 ≤ VO2 ≤ 90 ml/kg/min
   VO2_MIN_POINTS: 1,            // présente dès 1 mesure dans la fenêtre (D : la VO2 max varie lentement) ; valeur = moyenne
@@ -199,8 +183,8 @@ export const CONFIG = {
   LEVER_MIN_GAIN: 0.05,
 };
 
-export const IDS = ['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9'];
-export const GROUPS = { M1: 'sleep', M2: 'sleep', M3: 'activity', M4: 'activity', M5: 'activity', M6: 'activity', M7: 'fitness', M8: 'fitness', M9: 'fitness' };
+export const IDS = ['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8'];
+export const GROUPS = { M1: 'sleep', M2: 'sleep', M3: 'activity', M4: 'activity', M5: 'activity', M6: 'activity', M7: 'fitness', M8: 'fitness' };
 
 const MIN_MS = 60000;
 const DAY_MS = 86400000;
@@ -353,19 +337,6 @@ export function buildDays(quarters, cal) {
 
 // ================= Nuits =================
 
-// Unité des durées de sommeil : TOTAL_DURATION comparé à la durée de la session.
-// 'min', 's', ou null si aucune session ne permet de conclure.
-export function detectDurationUnit(sessions) {
-  const ratios = sessions
-    .filter(s => s.total > 0 && s.end > s.start)
-    .map(s => s.total / ((s.end - s.start) / MIN_MS));
-  const m = median(ratios);
-  if (m === null) return null;
-  if (m >= 0.2 && m <= 1.5) return 'min';
-  if (m >= 12 && m <= 90) return 's';
-  return null;
-}
-
 // Nuit à laquelle appartient une session commençant à t : D si t ∈ [D-1 18:00 ; D 06:00[, sinon null.
 function nightOf(t, cal) {
   const h = cal.hour(t);
@@ -374,10 +345,9 @@ function nightOf(t, cal) {
   return null;
 }
 
-// sessions : [{ start, end, intoBed, total, deep, light, rem, awake }] — instants en ms, durées brutes.
-// Renvoie { nights: Map(jour D → nuit), naps }. Siestes ignorées.
-export function buildNights(sessions, cal, unit = CONFIG.SLEEP_DURATION_UNIT) {
-  const toMin = unit === 's' ? 1 / 60 : 1;
+// sessions : [{ start, end }] — instants en ms. Renvoie { nights: Map(jour D → nuit), naps }. Siestes ignorées.
+// Nuit : coucher = début de la première session, lever = fin de la dernière, sommeil = durée des sessions.
+export function buildNights(sessions, cal) {
   const list = sessions
     .filter(s => Number.isFinite(s.start) && Number.isFinite(s.end) && s.end > s.start)
     .sort((a, b) => a.start - b.start);
@@ -406,45 +376,13 @@ export function buildNights(sessions, cal, unit = CONFIG.SLEEP_DURATION_UNIT) {
     nights.get(key).sessions.push(s);
     prev = { end: s.end, key };
   }
-  for (const n of nights.values()) finishNight(n, toMin);
-  return { nights, naps };
-}
-
-// Coucher, lever, sommeil effectif, stades et validité d'une nuit.
-function finishNight(n, toMin) {
-  const first = n.sessions[0];
-  const last = n.sessions[n.sessions.length - 1];
-  // Coucher = INTO_BED_TIME de la première session s'il est renseigné (et pas après son début), sinon son début.
-  n.bed = first.intoBed > 0 && first.intoBed <= first.start ? first.intoBed : first.start;
-  n.wake = last.end;
-  let sleep = 0;
-  let deep = 0;
-  let rem = 0;
-  let staged = true;
-  let span = false;
-  for (const s of n.sessions) {
-    const stages = (s.deep || 0) + (s.light || 0) + (s.rem || 0);
-    if (stages > 0) {
-      // Sommeil effectif = DEEP + LIGHT + REM si cette somme est > 0…
-      sleep += stages * toMin;
-      deep += (s.deep || 0) * toMin;
-      rem += (s.rem || 0) * toMin;
-      continue;
-    }
-    staged = false;
-    const net = ((s.total || 0) - (s.awake || 0)) * toMin;
-    if (net > 0) {
-      sleep += net;                          // …sinon TOTAL − AWAKE…
-    } else {
-      sleep += (s.end - s.start) / MIN_MS;   // …sinon durée de la session (export sans durées)
-      span = true;
-    }
+  for (const n of nights.values()) {
+    n.bed = n.sessions[0].start;
+    n.wake = n.sessions[n.sessions.length - 1].end;
+    n.sleepMin = n.sessions.reduce((a, s) => a + (s.end - s.start) / MIN_MS, 0);
+    n.valid = n.sleepMin >= CONFIG.VALID_NIGHT_MIN;
   }
-  n.sleepMin = sleep;
-  n.deepMin = staged ? deep : null;
-  n.remMin = staged ? rem : null;
-  n.source = staged ? 'stages' : span ? 'span' : 'total';
-  n.valid = sleep >= CONFIG.VALID_NIGHT_MIN;
+  return { nights, naps };
 }
 
 // Coucher en minutes depuis 12:00 de la veille (23:30 → 690 ; 00:30 → 750) ; lever en minutes depuis 00:00 du jour D.
@@ -477,18 +415,6 @@ export function regularities(nights, cal) {
 }
 
 // ================= FC de repos =================
-
-// HR_RESTING du bracelet (tableau « 7 derniers jours » seulement, pour la comparaison avec Gadgetbridge).
-// summaries : [{ t, rest }] — plusieurs lignes par jour : la plus récente du jour avec HR_RESTING > 0.
-export function restingByDay(summaries, cal) {
-  const best = new Map();
-  for (const s of summaries) {
-    if (!(s.rest > 0)) continue;
-    const key = cal.dayKey(s.t);
-    if (!best.has(key) || s.t > best.get(key).t) best.set(key, s);
-  }
-  return new Map([...best].map(([key, s]) => [key, s.rest]));
-}
 
 // FC de repos nocturne d'une nuit (M8) : moyenne de la moitié la plus basse des FC valides lues pendant ses sessions,
 // s'il y en a au moins CONFIG.REST_MIN_SAMPLES (une par minute) ; sinon null.
@@ -526,41 +452,41 @@ export function crc32(bytes, from = 0, to = bytes.length) {
 }
 const u32 = (b, i) => (b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24)) >>> 0;
 
-// Lecture d'un RAW_SUMMARY_DATA (Uint8Array). Renvoie { status, subtype, version, legacy, vo2Raw, vo2 } ;
-// status : 'illisible' (pas un résumé de séance), 'sans-vo2' (disposition sans champ VO2), 'non-documentée'
-// (couple absent de CONFIG.VO2_LAYOUTS), 'désaligné' (contrôles d'alignement en échec), 'lu'.
-// vo2Raw : octet lu (0 = absente) ; vo2 : valeur retenue (plausible) ou null.
+// Lecture d'un RAW_SUMMARY_DATA (Uint8Array). Renvoie { status, subtype, version, start, end, vo2Raw, vo2 } ;
+// status : 'illisible' (pas un résumé de séance, ou CRC faux), 'sans-vo2' (couple absent de CONFIG.VO2_LAYOUTS),
+// 'désaligné' (contrôles d'alignement en échec), 'lu'. start, end : instants (ms) du corps ; vo2Raw : octet lu
+// (0 = non calculée) ; vo2 : valeur retenue (plausible) ou null.
 export function decodeSummary(bytes) {
-  const out = { status: 'illisible', subtype: null, version: null, legacy: false, vo2Raw: null, vo2: null };
+  const out = { status: 'illisible', subtype: null, version: null, start: null, end: null, vo2Raw: null, vo2: null };
   if (!(bytes instanceof Uint8Array) || bytes.length < 13) return out;
   const flags = bytes[6];
   if (((flags >> 7) & 1) !== 1 || (flags & 3) !== 1) return out;   // type 1 = séance, détail 1 = résumé
+  if (crc32(bytes, 0, bytes.length - 4) !== u32(bytes, bytes.length - 4)) return out;
   out.subtype = (flags & 0x7f) >> 2;
   out.version = bytes[5];
-  out.legacy = crc32(bytes, 0, bytes.length - 4) !== u32(bytes, bytes.length - 4);
-  const key = `${out.subtype}/${out.version}`;
-  const layout = CONFIG.VO2_LAYOUTS[key];
+  const layout = CONFIG.VO2_LAYOUTS[`${out.subtype}/${out.version}`];
   if (!layout) {
-    out.status = CONFIG.VO2_NONE_SUBTYPES.includes(out.subtype) || CONFIG.VO2_NONE_PAIRS.includes(key) ? 'sans-vo2' : 'non-documentée';
+    out.status = 'sans-vo2';
     return out;
   }
-  const shift = out.legacy ? -1 : 0;
-  const end = bytes.length - (out.legacy ? 0 : 4);
-  if (layout.vo2 + shift >= end) {
+  if (layout.vo2 >= bytes.length - 4) {
     out.status = 'désaligné';
     return out;
   }
-  const start = u32(bytes, layout.start + shift);
-  const [avg, max, min] = layout.hr.map(i => bytes[i + shift]);
+  const start = u32(bytes, layout.start);
+  const end = u32(bytes, layout.end);
+  const [avg, max, min] = layout.hr.map(i => bytes[i]);
   const [lo, hi] = CONFIG.HR_VALID;
-  const aligned = Math.abs(start - u32(bytes, 0)) <= CONFIG.VO2_START_TOLERANCE_S
+  const aligned = Math.abs(start - u32(bytes, 0)) <= CONFIG.VO2_START_TOLERANCE_S && end >= start
     && avg >= lo && avg <= max && max <= hi && min <= avg;
   if (!aligned) {
     out.status = 'désaligné';
     return out;
   }
   out.status = 'lu';
-  out.vo2Raw = bytes[layout.vo2 + shift];
+  out.start = start * 1000;
+  out.end = end * 1000;
+  out.vo2Raw = bytes[layout.vo2];
   const [vlo, vhi] = CONFIG.VO2_PLAUSIBLE;
   out.vo2 = out.vo2Raw >= vlo && out.vo2Raw <= vhi ? out.vo2Raw : null;
   return out;
@@ -590,8 +516,9 @@ function inIntervals(intervals, t) {
 }
 
 // workouts : [{ start, end, kind, raw }] → { byDay: Map(jour → { count, strengthMin, undated }),
-// intervals (séances avec fin > début, tout type), vo2: Map(jour → [VO2 retenues]), measured }.
-// undated : séance de renforcement sans durée exploitable (fin ≤ début).
+// intervals (séances avec fin > début, tout type), vo2: Map(jour → [VO2 retenues]), timed (séances avec durée) }.
+// Fin ≤ début (GB écrit une fin négative pour la course et la marche) : fin lue dans le résumé, si possible.
+// undated : séance de renforcement sans durée exploitable.
 export function workoutsOf(workouts, cal) {
   const byDay = new Map();
   const vo2 = new Map();
@@ -602,19 +529,18 @@ export function workoutsOf(workouts, cal) {
     if (!byDay.has(key)) byDay.set(key, { count: 0, strengthMin: 0, undated: 0 });
     const d = byDay.get(key);
     d.count++;
-    if (w.end > w.start) spans.push([w.start, w.end]);
-    if (w.raw) {
-      const v = decodeSummary(w.raw).vo2;
-      if (v !== null) {
-        if (!vo2.has(key)) vo2.set(key, []);
-        vo2.get(key).push(v);
-      }
+    const s = w.raw ? decodeSummary(w.raw) : null;
+    const end = w.end > w.start ? w.end : s?.status === 'lu' ? s.end : 0;
+    if (end > w.start) spans.push([w.start, end]);
+    if (s?.vo2 != null) {
+      if (!vo2.has(key)) vo2.set(key, []);
+      vo2.get(key).push(s.vo2);
     }
     if (!isStrength(w.kind)) continue;
-    if (w.end > w.start) d.strengthMin += (w.end - w.start) / MIN_MS;
+    if (end > w.start) d.strengthMin += (end - w.start) / MIN_MS;
     else d.undated++;
   }
-  return { byDay, intervals: mergeIntervals(spans), vo2 };
+  return { byDay, intervals: mergeIntervals(spans), vo2, timed: spans.length };
 }
 
 // ================= Barèmes =================
@@ -645,7 +571,7 @@ const zoneTarget = ([young, old], age) => {
 };
 const scaleX = (points, f) => points.map(([x, y]) => [x * f, y]);
 
-// Barème effectif [[valeur, Δ]…] d'un indicateur pour ctx = { age, gender } ; null pour M9 (et M7 sans âge).
+// Barème effectif [[valeur, Δ]…] d'un indicateur pour ctx = { age, gender } ; null pour M7 sans âge.
 export function scaleFor(id, ctx = {}) {
   const age = Number.isFinite(ctx.age) ? ctx.age : null;
   switch (id) {
@@ -675,7 +601,7 @@ export function scaleFor(id, ctx = {}) {
   }
 }
 
-// Valeur neutre (Δ = 0) pour ce profil : premier point du barème à Δ = 0 (M1 : 7 h ; M9 : null).
+// Valeur neutre (Δ = 0) pour ce profil : premier point du barème à Δ = 0 (M1 : 7 h).
 export function targetFor(id, ctx = {}) {
   const s = scaleFor(id, ctx);
   const p = s?.find(([, y]) => y === 0);
@@ -720,29 +646,25 @@ export function jurcaLevel({ aerobic, strength = 0, steps = 0 }) {
 
 // ================= Analyse =================
 
-// Étape 1 : jours, nuits, régularités, FC de repos du bracelet, séances.
-// input : { timeZone, lastDataMs, quarters, summaries, sessions, workouts }
+// Étape 1 : jours, nuits, régularités, séances.
+// input : { timeZone, lastDataMs, quarters, sessions, workouts }
 export function prepare(input) {
   const cal = makeCalendar(input.timeZone);
   const days = buildDays(input.quarters ?? [], cal);
-  const unitDetected = detectDurationUnit(input.sessions ?? []);
-  const unit = unitDetected ?? CONFIG.SLEEP_DURATION_UNIT;
-  const { nights, naps } = buildNights(input.sessions ?? [], cal, unit);
+  const { nights, naps } = buildNights(input.sessions ?? [], cal);
   const w = workoutsOf(input.workouts ?? [], cal);
   return {
     cal,
     days,
     nights,
     naps,
-    unit,
-    unitDetected,
     dayList: [...days.values()].sort(byKey),
     nightList: [...nights.values()].sort(byKey),
     reg: regularities(nights, cal),
-    rest: restingByDay(input.summaries ?? [], cal),
     workouts: w.byDay,
     intervals: w.intervals,
     vo2: w.vo2,
+    timed: w.timed,
     lastKey: Number.isFinite(input.lastDataMs) ? cal.dayKey(input.lastDataMs) : null,
   };
 }
@@ -839,10 +761,11 @@ export function buildModel(base, opts = {}) {
 // Moyenne et erreur type d'une liste de valeurs.
 const statOf = values => ({ n: values.length, value: mean(values), se: values.length ? stdev(values) / Math.sqrt(values.length) : null });
 
-// Les 9 indicateurs sur la fenêtre de n jours finissant au jour endKey ; nuits de n clés finissant à nightEndKey.
+// Les 8 indicateurs sur la fenêtre de n jours finissant au jour endKey ; nuits de n clés finissant à nightEndKey.
 // opts.dailyMin : minimum de points des indicateurs quotidiens (M1, M2, M6, M8), CONFIG.MIN_POINTS par défaut.
 // Renvoie { startKey, endKey, nightStartKey, nightEndKey, validDays, validNights, restMean, ind, gap }.
-// ind[id] = { id, value, points, delta, present, estimated, reason, se } (+ undated pour M5, level pour M7 estimée).
+// ind[id] = { id, value, points, delta, present, estimated, reason, wait, se } (+ undated pour M5, level pour M7
+// estimée). Absent : reason courte, affichée telle quelle ; wait = jours ou nuits valides encore nécessaires, sinon null.
 export function windowIndicators(m, endKey, n, nightEndKey = endKey, opts = {}) {
   const base = m.base;
   const daily = opts.dailyMin ?? CONFIG.MIN_POINTS;
@@ -854,23 +777,32 @@ export function windowIndicators(m, endKey, n, nightEndKey = endKey, opts = {}) 
   const nn = nights.length;
   const ctx = { age: m.ageAt(endKey), gender: m.gender };
   const ind = {};
-  const put = (id, { n: points, value, se }, reason, minPoints = CONFIG.MIN_POINTS) => {
-    ind[id] = points >= minPoints && value !== null && Number.isFinite(value)
-      ? { id, value, points, delta: delta(id, value, ctx), present: true, estimated: false, reason: null, se }
-      : { id, value: null, points, delta: 0, present: false, estimated: false, reason, se: null };
+  const NIGHTS = ['nuit valide', 'nuits valides'];
+  const DAYS = ['jour valide', 'jours valides'];
+  // Absent faute de points : wait = points manquants, reason « dans 4 jours valides ». Absent pour une autre raison : why.
+  const put = (id, { n: points, value, se }, minPoints, words, why = null) => {
+    if (!why && points >= minPoints && Number.isFinite(value)) {
+      ind[id] = { id, value, points, delta: delta(id, value, ctx), present: true, estimated: false, reason: null, wait: null, se };
+      return;
+    }
+    const wait = why ? null : Math.max(1, minPoints - points);
+    ind[id] = { id, value: null, points, delta: 0, present: false, estimated: false, se: null, wait, reason: why ?? `dans ${plural(wait, ...words)}` };
   };
   // Valeurs hebdomadaires (M3, M4, M5) : 7 jours valides, même quand la valeur provisoire abaisse le minimum quotidien.
-  const fewDays = `${plural(nd, 'jour valide', 'jours valides')}, ${CONFIG.MIN_POINTS} requis${daily < CONFIG.MIN_POINTS ? ' pour une valeur hebdomadaire' : ''}`;
-  const nightsNeeded = plural(daily, 'requise', 'requises');
   const weekly = values => {
     const s = statOf(values);
     return { n: s.n, value: s.value === null ? null : s.value * 7, se: s.se === null ? null : s.se * 7 };
   };
 
-  put('M1', statOf(nights.map(x => x.sleepMin / 60)), `${plural(nn, 'nuit valide', 'nuits valides')}, ${nightsNeeded}`, daily);
+  put('M1', statOf(nights.map(x => x.sleepMin / 60)), daily, NIGHTS);
 
+  // Régularité : une valeur par nuit précédée d'au moins 2 nuits valides parmi les 4 précédentes.
   const regs = nights.map(x => base.reg.get(x.key)).filter(v => v !== undefined);
-  put('M2', statOf(regs), `${plural(regs.length, 'nuit précédée', 'nuits précédées')} d'au moins 2 nuits valides sur les 4 précédentes, ${nightsNeeded}`, daily);
+  put('M2', statOf(regs), daily, NIGHTS);
+  if (!ind.M2.present) {
+    ind.M2.wait = Math.max(ind.M2.wait, CONFIG.REG_MIN_PREV + 1 - nn);
+    ind.M2.reason = `dans ${plural(ind.M2.wait, ...NIGHTS)}`;
+  }
 
   // FC de repos nocturnes de la fenêtre : M8, et repli des zones pour les jours sans nuit dans les 14 jours précédents.
   const rests = nights.map(x => m.nightRest.get(x.key)).filter(v => v !== undefined);
@@ -878,12 +810,12 @@ export function windowIndicators(m, endKey, n, nightEndKey = endKey, opts = {}) 
 
   if (m.zones) {
     const z = days.map(d => m.zones.minutes(d.key, restMean));
-    put('M3', weekly(z.map(x => x.z13)), fewDays);
-    put('M4', weekly(z.map(x => x.z45)), fewDays);
+    put('M3', weekly(z.map(x => x.z13)), CONFIG.MIN_POINTS, DAYS);
+    put('M4', weekly(z.map(x => x.z45)), CONFIG.MIN_POINTS, DAYS);
   } else {
-    const why = m.hasHr ? 'date de naissance inconnue (zones cardiaques)' : 'FC absente de l\'export';
-    put('M3', { n: 0, value: null }, why);
-    put('M4', { n: 0, value: null }, why);
+    const why = m.hasHr ? 'date de naissance absente du profil' : 'FC absente de l\'export';
+    put('M3', { n: 0, value: null }, 0, null, why);
+    put('M4', { n: 0, value: null }, 0, null, why);
   }
 
   let sessions = 0;
@@ -894,45 +826,33 @@ export function windowIndicators(m, endKey, n, nightEndKey = endKey, opts = {}) 
     undated += w.undated;
   }
   if (sessions === 0) {
-    put('M5', { n: 0, value: null }, 'aucune séance enregistrée sur la période (0 et « non enregistré » indiscernables)');
+    put('M5', { n: 0, value: null }, 0, null, 'dès une séance sur le bracelet');
   } else {
-    put('M5', weekly(days.map(d => base.workouts.get(d.key)?.strengthMin ?? 0)), fewDays);
+    put('M5', weekly(days.map(d => base.workouts.get(d.key)?.strengthMin ?? 0)), CONFIG.MIN_POINTS, DAYS);
   }
   ind.M5.undated = undated;
 
-  put('M6', statOf(days.map(d => d.steps)), `${plural(nd, 'jour valide', 'jours valides')}, ${daily} requis`, daily);
+  put('M6', statOf(days.map(d => d.steps)), daily, DAYS);
 
-  put('M8', statOf(rests), m.hasHr
-    ? `${plural(rests.length, 'nuit', 'nuits')} avec FC de repos nocturne (au moins ${CONFIG.REST_MIN_SAMPLES} min de FC valide), ${nightsNeeded}`
-    : 'FC absente de l\'export', daily);
+  if (m.hasHr) put('M8', statOf(rests), daily, ['nuit avec FC', 'nuits avec FC']);
+  else put('M8', { n: 0, value: null }, 0, null, 'FC absente de l\'export');
 
   // M7, voie 1 : VO2 max du bracelet (moyenne des mesures de la fenêtre, présente dès 1 mesure).
   const vo2 = [];
   for (const [key, list] of base.vo2) if (key >= startKey && key <= endKey) vo2.push(...list);
   if (vo2.length && ctx.age !== null) {
-    put('M7', { n: vo2.length, value: mean(vo2), se: CONFIG.VO2_ERROR }, '', CONFIG.VO2_MIN_POINTS);
-  } else {
+    put('M7', { n: vo2.length, value: mean(vo2), se: CONFIG.VO2_ERROR }, CONFIG.VO2_MIN_POINTS);
+  } else if (ctx.age !== null && m.bmi !== null && ind.M8.present && ind.M3.present && ind.M4.present && ind.M6.present) {
     // M7, voie 2 : estimation de Jurca, affichée et non comptée.
-    const missing = [];
-    if (ctx.age === null) missing.push('date de naissance');
-    if (m.bmi === null) missing.push('taille et poids du profil');
-    if (!ind.M8.present) missing.push('FC de repos nocturne');
-    if (!(ind.M3.present && ind.M4.present && ind.M6.present)) missing.push('7 jours valides avec zones cardiaques');
-    if (missing.length) {
-      ind.M7 = { id: 'M7', value: null, points: 0, delta: 0, present: false, estimated: false, se: null,
-        reason: `aucune mesure du bracelet sur la période et estimation impossible (${missing.join(', ')})` };
-    } else {
-      const level = jurcaLevel({ aerobic: ind.M3.value + ind.M4.value, strength: ind.M5.present ? ind.M5.value : 0, steps: ind.M6.value });
-      ind.M7 = {
-        id: 'M7', value: jurcaVo2({ age: ctx.age, gender: m.gender, bmi: m.bmi, rest: ind.M8.value, level }),
-        points: 0, delta: 0, present: false, estimated: true, se: null, level,
-        reason: 'estimée : recouvre la FC de repos et l\'activité, déjà comptées ; enregistre une course ou une marche en extérieur pour une mesure du bracelet',
-      };
-    }
+    const level = jurcaLevel({ aerobic: ind.M3.value + ind.M4.value, strength: ind.M5.present ? ind.M5.value : 0, steps: ind.M6.value });
+    ind.M7 = {
+      id: 'M7', value: jurcaVo2({ age: ctx.age, gender: m.gender, bmi: m.bmi, rest: ind.M8.value, level }),
+      points: 0, delta: 0, present: false, estimated: true, se: null, wait: null, level,
+      reason: 'estimation sans effort, non comptée : une course d\'au moins 10 min dehors donnera la VO2 max du bracelet',
+    };
+  } else {
+    put('M7', { n: 0, value: null }, 0, null, 'après une course d\'au moins 10 min dehors');
   }
-
-  ind.M9 = { id: 'M9', value: null, points: 0, delta: 0, present: false, estimated: false, se: null,
-    reason: 'masse maigre non mesurée : ni balance à impédance ni DEXA dans Gadgetbridge' };
 
   const gap = IDS.reduce((a, id) => a + ind[id].delta, 0);
   return { startKey, endKey, nightStartKey, nightEndKey, validDays: nd, validNights: nn, restMean, ind: Object.fromEntries(IDS.map(id => [id, ind[id]])), gap };
@@ -977,6 +897,7 @@ function indicatorsOf(e, ctx, { recent = true } = {}) {
       present: a.present,
       estimated: a.estimated,
       reason: a.reason,
+      wait: a.wait,
       points: a.points,
       value6m: a.value,
       value30: shown30 ? b.value : null,
@@ -1023,12 +944,8 @@ function nightScores(base, x) {
     bed: x.bed,
     wake: x.wake,
     sleepMin: x.sleepMin,
-    source: x.source,
     performance: Math.min(100, (x.sleepMin / CONFIG.SLEEP_NEED_MIN) * 100),
     regularity: base.reg.get(x.key) ?? null,
-    // Efficacité : sans durées transmises (source « span »), le sommeil vaut la session entière : non calculable.
-    efficiency: x.source === 'span' ? null : Math.min(100, (x.sleepMin / ((x.wake - x.bed) / MIN_MS)) * 100),
-    restorative: x.deepMin === null ? null : ((x.deepMin + x.remMin) / x.sleepMin) * 100,
   };
 }
 
@@ -1041,8 +958,6 @@ export function analyze(base, opts = {}) {
     lastKey: base.lastKey,
     firstKey: base.dayList[0]?.key ?? null,
     lastCompleteKey: null,
-    unit: base.unit,
-    unitDetected: base.unitDetected,
     naps: base.naps,
     validDays: base.dayList.filter(d => d.valid).length,
     validNights: base.nightList.filter(n => n.valid).length,
@@ -1053,6 +968,7 @@ export function analyze(base, opts = {}) {
     provisional: null,
     levers: [],
     curve: [],
+    upcoming: [],
     sleep: { last: null, avg7: null },
     week: [],
   };
@@ -1072,6 +988,10 @@ export function analyze(base, opts = {}) {
   const nowCount = nightsIn31(L);
   const lastSunday = sundayOnOrBefore(L);
   const first = [out.firstKey, base.nightList[0]?.key].filter(Boolean).sort()[0] ?? L;
+  // Rythme et moyennes 30 jours : au-delà de 30 jours de données. Avant, les fenêtres de 30 et 182 jours contiennent
+  // les mêmes données : rythme = 1,0x par construction.
+  const recentAt = X => dayDiff(first, X) > CONFIG.PACE_WINDOW_DAYS;
+  const paceOf = e => (recentAt(e.key) ? e.pace : null);
   const sundays = [];
   for (let k = sundayOnOrAfter(first); k <= lastSunday; k = addDays(k, 7)) if (unlocked(k)) sundays.push(k);
   out.unlock = {
@@ -1089,7 +1009,7 @@ export function analyze(base, opts = {}) {
       civil: e.civil,
       bio: e.bio,
       gap: e.gap,
-      pace: e.pace,
+      pace: paceOf(e),
       calibrating: e.calibrating,
       reliability: reliabilityOf(e.w182).score,
       values: Object.fromEntries(IDS.map(id => [id, e.w182.ind[id].value])),
@@ -1100,7 +1020,7 @@ export function analyze(base, opts = {}) {
     let shown = null;
     if (evals.length) {
       const e = evals[evals.length - 1];
-      const prev = evals.length > 1 ? evals[evals.length - 2].pace : null;
+      const prev = evals.length > 1 ? paceOf(evals[evals.length - 2]) : null;
       const ctx = { age: e.civil, gender: m.gender };
       shown = e;
       out.official = {
@@ -1114,20 +1034,20 @@ export function analyze(base, opts = {}) {
         bio: e.bio,
         gap: e.gap,
         ageState: ageState(e.gap),
-        pace: { value: e.pace, state: paceState(e.pace), g30: e.g30, g182: e.gap, prev },
+        pace: recentAt(e.key) ? { value: e.pace, state: paceState(e.pace), g30: e.g30, g182: e.gap, prev } : null,
         nextUpdateDays: daysToNextUpdate(L),
         interval: precisionOf(e, ctx),
         reliability: reliabilityOf(e.w182),
         window: e.w182,
         window30: e.w30,
-        indicators: indicatorsOf(e, ctx),
+        indicators: indicatorsOf(e, ctx, { recent: recentAt(e.key) }),
       };
     }
 
     // ---- Aperçu quotidien (MIEUX) : jours jusqu'à L−1, nuits jusqu'à L, mêmes règles de déblocage ----
     if (unlocked(L)) {
       const e = L === shown?.key ? shown : evaluate(m, L);
-      out.preview = { key: L, bio: e.bio, gap: e.gap, ageState: ageState(e.gap), pace: { value: e.pace, state: paceState(e.pace) } };
+      out.preview = { key: L, bio: e.bio, gap: e.gap, ageState: ageState(e.gap), pace: recentAt(L) ? { value: e.pace, state: paceState(e.pace) } : null };
       shown ??= e;
     }
 
@@ -1138,7 +1058,7 @@ export function analyze(base, opts = {}) {
       const reliability = reliabilityOf(e.w182);
       if (reliability.measured > 0) {
         const ctx = { age: e.civil, gender: m.gender };
-        const recent = dayDiff(first, L) > CONFIG.PACE_WINDOW_DAYS;
+        const recent = recentAt(L);
         out.provisional = {
           key: L,
           civil: e.civil,
@@ -1156,6 +1076,14 @@ export function analyze(base, opts = {}) {
 
     // ---- Leviers : sur la valeur officielle (sinon l'aperçu, sinon la valeur provisoire) ----
     if (shown) out.levers = leversOf(shown, { age: shown.civil, gender: m.gender });
+
+    // ---- À venir : valeur officielle (nuits manquantes, ou dimanche prochain), rythme (date) ----
+    if (!out.official) {
+      out.upcoming.push(out.unlock.nightsToGo > 0
+        ? { id: 'official', count: out.unlock.nightsToGo, unit: ['nuit valide', 'nuits valides'] }
+        : { id: 'official', date: sundayOnOrAfter(addDays(L, 1)) });
+    }
+    if (!recentAt(L)) out.upcoming.push({ id: 'pace', date: addDays(first, CONFIG.PACE_WINDOW_DAYS + 1) });
   }
 
   // ---- Sommeil : dernière nuit valide, moyenne des 7 dernières ----
@@ -1169,8 +1097,6 @@ export function analyze(base, opts = {}) {
       performance: avg('performance'),
       sleepMin: avg('sleepMin'),
       regularity: avg('regularity'),
-      efficiency: avg('efficiency'),
-      restorative: avg('restorative'),
     } : null,
   };
 
@@ -1194,9 +1120,7 @@ export function analyze(base, opts = {}) {
       quarters: d ? d.quarters : 0,
       valid: Boolean(d?.valid),
       sleepMin: night ? night.sleepMin : null,
-      sleepSource: night ? night.source : null,
-      // Pour comparer avec Gadgetbridge : HR_RESTING du bracelet d'abord, sinon la FC de repos nocturne.
-      rest: base.rest.get(key) ?? nightRest.get(key) ?? null,
+      rest: nightRest.get(key) ?? null,   // FC de repos nocturne (M8) de la nuit finissant ce jour
     });
   }
   return out;
@@ -1204,14 +1128,11 @@ export function analyze(base, opts = {}) {
 
 // ================= Export Gadgetbridge : tables et codes =================
 
-export const APP_VERSION = '2.1.0';
+export const APP_VERSION = '2.2.0';
 
 // Tables lues (schéma Gadgetbridge 160, GBDaoGenerator.java).
 const T_ACT = 'XIAOMI_ACTIVITY_SAMPLE';
 const T_SLEEP = 'XIAOMI_SLEEP_TIME_SAMPLE';
-const T_STAGE = 'XIAOMI_SLEEP_STAGE_SAMPLE';
-const T_DAILY = 'XIAOMI_DAILY_SUMMARY_SAMPLE';
-const T_MANUAL = 'XIAOMI_MANUAL_SAMPLE';
 const T_WORKOUT = 'BASE_ACTIVITY_SUMMARY';
 const T_FILE = 'XIAOMI_ACTIVITY_FILE';
 const T_USER = 'USER';
@@ -1219,10 +1140,7 @@ const T_ATTR = 'USER_ATTRIBUTES';
 // [table, colonnes d'horodatage]
 const TABLES = [
   [T_ACT, ['TIMESTAMP']],
-  [T_SLEEP, ['TIMESTAMP', 'WAKEUP_TIME', 'INTO_BED_TIME']],
-  [T_STAGE, ['TIMESTAMP']],
-  [T_DAILY, ['TIMESTAMP']],
-  [T_MANUAL, ['TIMESTAMP']],
+  [T_SLEEP, ['TIMESTAMP', 'WAKEUP_TIME']],
   [T_WORKOUT, ['START_TIME', 'END_TIME']],
   ['DEVICE', []],
   [T_FILE, ['TIMESTAMP']],
@@ -1231,8 +1149,6 @@ const TABLES = [
 ];
 const REQUIRED = [T_ACT, T_SLEEP];   // sans elles : « Export non reconnu »
 const DAYS = 14;                    // jours détaillés dans le Diagnostic
-const VO2 = /vo2|oxygen/i;
-const STAGE_DURATIONS = ['DEEP_SLEEP_DURATION', 'LIGHT_SLEEP_DURATION', 'REM_SLEEP_DURATION'];
 // Fichiers Xiaomi (XiaomiActivityFileId.java, XiaomiActivityParser.java) : « TYPE/SUBTYPE/DETAIL_TYPE ».
 const FILE_KINDS = {
   '0/0/0': 'activité minute', '0/0/1': 'résumé du jour', '0/3/0': 'stades de sommeil',
@@ -1312,7 +1228,6 @@ function wrap(prefix, items, width = 78) {
 
 // SQL
 const q = name => `"${String(name).replace(/"/g, '""')}"`;   // identifiant entre guillemets
-const stageSum = cols => `(${cols.map(c => `COALESCE(${q(c)}, 0)`).join(' + ')})`;
 function rows(db, sql, params = []) {
   const st = db.prepare(sql);
   try {
@@ -1467,15 +1382,15 @@ export function describeProfile(p, clock) {
 
 // ================= Données du calcul =================
 
-// Lit l'export pour calc.js : agrégats par quart d'heure, résumés journaliers, sessions de sommeil, séances (avec leur
-// résumé binaire RAW_SUMMARY_DATA, d'où la VO2 max du bracelet), FC minute des nuits valides (M8), minutes au-dessus
-// du plus bas seuil des zones cardiaques (M3, M4), profil.
+// Lit l'export pour calc.js : agrégats par quart d'heure, sessions de sommeil, séances (avec leur résumé binaire
+// RAW_SUMMARY_DATA, d'où la VO2 max du bracelet), FC minute des nuits valides (M8), minutes au-dessus du plus bas
+// seuil des zones cardiaques (M3, M4), profil.
 export function readExport(db, clock, now) {
   const tables = new Set(rows(db, "SELECT name FROM sqlite_master WHERE type = 'table'").map(r => r.name));
   const missing = REQUIRED.filter(t => !tables.has(t));
   if (missing.length) throw new UserError(`Export non reconnu (table absente : ${missing.join(', ')}).`);
   const cols = {};
-  for (const t of [T_ACT, T_SLEEP, T_DAILY, T_WORKOUT]) cols[t] = tables.has(t) ? columnsOf(db, t) : new Set();
+  for (const t of [T_ACT, T_SLEEP, T_WORKOUT]) cols[t] = tables.has(t) ? columnsOf(db, t) : new Set();
   const has = (t, c) => cols[t].has(c);
   // Unité de chaque colonne d'horodatage, détectée sur les données.
   const unitOf = (t, c, fallback) => {
@@ -1516,34 +1431,13 @@ export function readExport(db, clock, now) {
     `SELECT TIMESTAMP / ${actUnit === 's' ? 900 : 900000} AS q, COUNT(*) AS n, SUM(${steps}) AS steps, SUM(${ok}) AS hr
      FROM ${q(T_ACT)} WHERE ${sa.sql} AND TIMESTAMP > 0 GROUP BY q`, sa.p);
 
-  // Résumés journaliers : HR_RESTING (plusieurs lignes par jour).
-  let summaries = [];
-  if (has(T_DAILY, 'TIMESTAMP') && has(T_DAILY, 'HR_RESTING')) {
-    const s = scope(T_DAILY);
-    const u = unitOf(T_DAILY, 'TIMESTAMP', 'ms');
-    summaries = rows(db, `SELECT TIMESTAMP AS t, HR_RESTING AS rest FROM ${q(T_DAILY)} WHERE ${s.sql} AND HR_RESTING > 0`, s.p)
-      .map(r => ({ t: toMs(r.t, u), rest: r.rest }))
-      .filter(r => r.t !== null);
-  }
-
-  // Sessions de sommeil.
-  const pick = (t, names) => names.map(c => (has(t, c) ? q(c) : `NULL AS ${q(c)}`)).join(', ');
+  // Sessions de sommeil : début et fin (le bracelet ne transmet ni stades ni durées).
   const ss = scope(T_SLEEP);
   const uStart = unitOf(T_SLEEP, 'TIMESTAMP', 'ms');
   const uWake = unitOf(T_SLEEP, 'WAKEUP_TIME', uStart);
-  const uBed = unitOf(T_SLEEP, 'INTO_BED_TIME', uStart);
-  const sessions = rows(db, `SELECT ${pick(T_SLEEP, ['TIMESTAMP', 'WAKEUP_TIME', 'INTO_BED_TIME', 'TOTAL_DURATION',
-    'DEEP_SLEEP_DURATION', 'LIGHT_SLEEP_DURATION', 'REM_SLEEP_DURATION', 'AWAKE_DURATION'])} FROM ${q(T_SLEEP)} WHERE ${ss.sql}`, ss.p)
-    .map(r => ({
-      start: toMs(r.TIMESTAMP, uStart),
-      end: toMs(r.WAKEUP_TIME, uWake),
-      intoBed: toMs(r.INTO_BED_TIME, uBed) ?? 0,
-      total: r.TOTAL_DURATION ?? 0,
-      deep: r.DEEP_SLEEP_DURATION ?? 0,
-      light: r.LIGHT_SLEEP_DURATION ?? 0,
-      rem: r.REM_SLEEP_DURATION ?? 0,
-      awake: r.AWAKE_DURATION ?? 0,
-    }));
+  const wake = has(T_SLEEP, 'WAKEUP_TIME') ? 'WAKEUP_TIME' : 'NULL';
+  const sessions = rows(db, `SELECT TIMESTAMP AS s, ${wake} AS e FROM ${q(T_SLEEP)} WHERE ${ss.sql}`, ss.p)
+    .map(r => ({ start: toMs(r.s, uStart), end: toMs(r.e, uWake) }));
 
   // Séances, avec leur résumé binaire (VO2 max du bracelet, décodée par calc.js : decodeSummary).
   let workouts = [];
@@ -1557,7 +1451,7 @@ export function readExport(db, clock, now) {
       .map(r => ({ start: toMs(r.s, u1), end: toMs(r.e, u2) ?? 0, kind: r.k, raw: r.r instanceof Uint8Array ? r.r : null }));
   }
 
-  const base = prepare({ timeZone: clock.timeZone, lastDataMs, quarters, summaries, sessions, workouts });
+  const base = prepare({ timeZone: clock.timeZone, lastDataMs, quarters, sessions, workouts });
 
   // FC de repos nocturne (M8, et FC de repos des zones) : FC minute par minute pendant les sessions de chaque nuit
   // valide ; calc.js en garde la moyenne de la moitié la plus basse (au moins 60 minutes).
@@ -1602,20 +1496,14 @@ export function readExport(db, clock, now) {
 
   const calc = { ...opts, active };   // options d'analyse
   const result = analyze(base, calc);
-  const nights = base.nightList;
   const info = {
     days: base.days.size,
-    nights: nights.length,
-    sources: ['stages', 'total', 'span'].map(s => nights.filter(n => n.source === s).length),
-    unit: base.unit,
-    unitDetected: base.unitDetected,
-    restDays: base.rest.size,
+    nights: base.nightList.length,
     restNights: nightRest.size,
     needRest: need.length,
     workouts: workouts.length,
-    timed: workouts.filter(w => w.end > w.start).length,
-    strength: workouts.filter(w => isStrength(w.kind) && w.end > w.start).length,
-    strengthUndated: workouts.filter(w => isStrength(w.kind) && !(w.end > w.start)).length,
+    timed: base.timed,
+    strengthUndated: [...base.workouts.values()].reduce((a, d) => a + d.undated, 0),
     vo2: [...base.vo2.values()].reduce((a, list) => a + list.length, 0),
     profileUsable: usable,
     body: Boolean(calcProfile?.height && calcProfile?.weight),
@@ -1705,7 +1593,7 @@ export function diagnose(db, meta, clock, now) {
       days.push({
         key, start, end, minutes: Math.round((end - start) / 60000),
         nightFrom: clock.at(addDays(key, -1), CONFIG.NIGHT_FROM_HOUR), nightTo: clock.at(key, CONFIG.NIGHT_TO_HOUR), dayTo: clock.at(key, CONFIG.NIGHT_FROM_HOUR),
-        samples: new Set(), hr: new Set(), quarters: new Set(), nights: [], stages: 0, summary: false, rest: false,
+        samples: new Set(), hr: new Set(), quarters: new Set(), nights: [],
       });
     }
   }
@@ -1749,11 +1637,9 @@ export function diagnose(db, meta, clock, now) {
   attempt('sessions de sommeil', () => {
     if (!days.length || !hasCol(T_SLEEP, 'WAKEUP_TIME')) return;
     const s = scope(T_SLEEP);
-    const durCols = [...STAGE_DURATIONS, 'TOTAL_DURATION'].filter(c => hasCol(T_SLEEP, c));
-    const dur = durCols.length ? `(${stageSum(durCols)} > 0)` : '0';
-    const sessions = rows(db, `SELECT TIMESTAMP AS s, WAKEUP_TIME AS e, ${dur} AS d FROM ${q(T_SLEEP)} WHERE ${s.sql} AND TIMESTAMP >= ? ORDER BY TIMESTAMP`,
+    const sessions = rows(db, `SELECT TIMESTAMP AS s, WAKEUP_TIME AS e FROM ${q(T_SLEEP)} WHERE ${s.sql} AND TIMESTAMP >= ? ORDER BY TIMESTAMP`,
       [...s.p, fromMs(from, SLEEP_TS)])
-      .map(r => ({ s: toMs(r.s, SLEEP_TS), e: toMs(r.e ?? 0, WAKE_TS), d: Boolean(r.d) }));
+      .map(r => ({ s: toMs(r.s, SLEEP_TS), e: toMs(r.e ?? 0, WAKE_TS) }));
     for (const x of sessions) {
       const night = days.find(d => x.s >= d.nightFrom && x.s < d.nightTo);
       if (night) night.nights.push(x);
@@ -1771,54 +1657,7 @@ export function diagnose(db, meta, clock, now) {
     }
   });
 
-  // Stades enregistrés pendant les sessions de nuit.
-  attempt('stades', () => {
-    if (!days.length || !has.has(T_STAGE)) return;
-    const s = scope(T_STAGE);
-    const col = `${T_STAGE}.TIMESTAMP`;
-    const ts = rows(db, `SELECT TIMESTAMP AS t FROM ${q(T_STAGE)} WHERE ${s.sql} AND TIMESTAMP >= ?`, [...s.p, fromMs(from, col)])
-      .map(r => toMs(r.t, col));
-    for (const d of days) d.stages = ts.filter(t => d.nights.some(x => t >= x.s && t <= x.e)).length;
-  });
-
-  // Résumés journaliers : présence, et HR_RESTING > 0 (testé en SQL, valeur jamais lue).
-  attempt('résumés journaliers', () => {
-    if (!days.length || !has.has(T_DAILY)) return;
-    const s = scope(T_DAILY);
-    const col = `${T_DAILY}.TIMESTAMP`;
-    const ok = hasCol(T_DAILY, 'HR_RESTING') ? '(HR_RESTING > 0)' : '0';
-    for (const r of rows(db, `SELECT TIMESTAMP AS t, ${ok} AS ok FROM ${q(T_DAILY)} WHERE ${s.sql} AND TIMESTAMP >= ?`, [...s.p, fromMs(from, col)])) {
-      const d = days.find(x => x.key === clock.dayKey(toMs(r.t, col)));
-      if (d) {
-        d.summary = true;
-        d.rest ||= Boolean(r.ok);
-      }
-    }
-  });
-
-  // VO2 max : toute table ou colonne qui en parle, et clés du JSON SUMMARY_DATA des séances.
-  const vo2 = [];
-  attempt('recherche de la VO2 max', () => {
-    for (const t of tables) {
-      if (VO2.test(t) && count[t] > 0) vo2.push(`table ${t} (${fmt(count[t])} lignes)`);
-      for (const c of rows(db, `PRAGMA table_info(${q(t)})`)) {
-        if (!VO2.test(c.name)) continue;
-        const k = one(db, `SELECT COUNT(*) AS k FROM ${q(t)} WHERE ${q(c.name)} > 0`).k;
-        if (k > 0) vo2.push(`${t}.${c.name} (${fmt(k)} valeurs > 0)`);
-      }
-    }
-    if (!hasCol(T_WORKOUT, 'SUMMARY_DATA')) return;
-    const s = scope(T_WORKOUT);
-    const keys = new Map();
-    for (const r of rows(db, `SELECT SUMMARY_DATA AS j FROM ${q(T_WORKOUT)} WHERE ${s.sql} AND SUMMARY_DATA IS NOT NULL AND SUMMARY_DATA <> ''`, s.p)) {
-      try {
-        for (const k of Object.keys(JSON.parse(r.j))) if (VO2.test(k)) keys.set(k, (keys.get(k) ?? 0) + 1);
-      } catch { /* JSON illisible : ignoré */ }
-    }
-    for (const [k, n] of keys) vo2.push(`SUMMARY_DATA « ${k} » (${fmt(n)} séances)`);
-  });
-
-  // Résumés binaires des séances (RAW_SUMMARY_DATA, décodés par calc.js) : effectifs par sous-type, version et format,
+  // Résumés binaires des séances (RAW_SUMMARY_DATA, décodés par calc.js) : effectifs par sous-type et version,
   // disposition, nombre de VO2 non nulles et retenues. Comptages seulement : aucune valeur n'est lue dans le rapport.
   const blobs = new Map();
   attempt('résumés de séance', () => {
@@ -1830,9 +1669,7 @@ export function diagnose(db, meta, clock, now) {
       while (st.step()) {
         const raw = st.get()[0];
         const d = decodeSummary(raw instanceof Uint8Array ? raw : null);
-        const id = d.status === 'illisible'
-          ? 'illisibles'
-          : `0x${d.subtype.toString(16).padStart(2, '0')} v${d.version} ${d.legacy ? 'ancien format' : 'format actuel'}`;
+        const id = d.status === 'illisible' ? 'illisibles' : `0x${d.subtype.toString(16).padStart(2, '0')} v${d.version}`;
         if (!blobs.has(id)) blobs.set(id, { k: 0, status: d.status, read: 0, misaligned: 0, nonzero: 0, kept: 0 });
         const b = blobs.get(id);
         b.k++;
@@ -1845,18 +1682,6 @@ export function diagnose(db, meta, clock, now) {
       st.free();
     }
   });
-
-  // Unité des durées de sommeil : TOTAL_DURATION comparé à WAKEUP_TIME − TIMESTAMP.
-  // Seul le verdict est affiché : le rapport lui-même révélerait l'efficacité du sommeil.
-  const sleepUnit = () => {
-    if (!hasCol(T_SLEEP, 'TOTAL_DURATION') || !hasCol(T_SLEEP, 'WAKEUP_TIME')) return 'colonnes absentes';
-    const ratios = rows(db, `SELECT TIMESTAMP AS s, WAKEUP_TIME AS e, TOTAL_DURATION AS d FROM ${q(T_SLEEP)} WHERE TOTAL_DURATION > 0 AND WAKEUP_TIME > 0 AND TIMESTAMP > 0`)
-      .map(r => r.d / ((toMs(r.e, WAKE_TS) - toMs(r.s, SLEEP_TS)) / 60000))
-      .filter(x => Number.isFinite(x) && x > 0);
-    const m = median(ratios);
-    const verdict = m === null ? 'indéterminée' : m >= 0.2 && m <= 1.5 ? 'minutes' : m >= 12 && m <= 90 ? 'secondes' : 'indéterminée';
-    return `${verdict} (${fmt(ratios.length)} sessions comparées ; à confirmer contre l'écran sommeil de Gadgetbridge)`;
-  };
 
   // Profil : lu pour des contrôles oui/non ; ses valeurs ne figurent jamais dans le rapport.
   let profile = null;
@@ -1927,22 +1752,12 @@ export function diagnose(db, meta, clock, now) {
     const hrGap = median(hrMinutes.slice(1).map((m, i) => m - hrMinutes[i]));
     say(`  FC valide : ${sampled ? `${pct(withHr, sampled)} % des minutes échantillonnées` : 'aucune minute échantillonnée'}`);
     say(`  Écart médian entre deux FC valides : ${hrGap === null ? 'indéterminé' : `${fmt(hrGap)} min`} (attendu : 1 min)`);
-    say(`  Durées de sommeil : ${sleepUnit()}`);
   });
 
   section('SOMMEIL ET SÉANCES (appareil retenu)', () => {
-    if (has.has(T_SLEEP)) {
-      const stageCols = STAGE_DURATIONS.filter(c => hasCol(T_SLEEP, c));
-      const parts = [`${fmt(countIn(T_SLEEP))} sessions`];
-      if (hasCol(T_SLEEP, 'IS_AWAKE')) parts.push(`IS_AWAKE = 1 : ${fmt(countIn(T_SLEEP, 'IS_AWAKE = 1'))}`);
-      if (stageCols.length) parts.push(`durées par stade > 0 : ${fmt(countIn(T_SLEEP, `${stageSum(stageCols)} > 0`))}`);
-      if (hasCol(T_SLEEP, 'TOTAL_DURATION')) parts.push(`TOTAL_DURATION > 0 : ${fmt(countIn(T_SLEEP, 'TOTAL_DURATION > 0'))}`);
-      if (hasCol(T_SLEEP, 'INTO_BED_TIME')) parts.push(`INTO_BED_TIME > 0 : ${fmt(countIn(T_SLEEP, 'INTO_BED_TIME > 0'))}`);
-      say(wrap('  Sommeil : ', parts));
-    }
+    if (has.has(T_SLEEP)) say(`  Sommeil : ${fmt(countIn(T_SLEEP))} sessions`);
     if (has.has(T_WORKOUT)) {
       const parts = [`${fmt(countIn(T_WORKOUT))} séances`];
-      if (hasCol(T_WORKOUT, 'SUMMARY_DATA')) parts.push(`SUMMARY_DATA renseigné : ${fmt(countIn(T_WORKOUT, "SUMMARY_DATA IS NOT NULL AND SUMMARY_DATA <> ''"))}`);
       if (hasCol(T_WORKOUT, 'RAW_SUMMARY_DATA')) parts.push(`RAW_SUMMARY_DATA renseigné : ${fmt(countIn(T_WORKOUT, 'RAW_SUMMARY_DATA IS NOT NULL'))}`);
       if (hasCol(T_WORKOUT, 'START_TIME') && hasCol(T_WORKOUT, 'END_TIME')) parts.push(`fin > début : ${fmt(countIn(T_WORKOUT, 'END_TIME > START_TIME'))}`);
       say(wrap('  Séances : ', parts));
@@ -1950,18 +1765,16 @@ export function diagnose(db, meta, clock, now) {
   });
 
   section('CODES (valeur → effectif, appareil retenu)', () => {
-    for (const [t, c] of [[T_STAGE, 'STAGE'], [T_WORKOUT, 'ACTIVITY_KIND'], [T_MANUAL, 'TYPE']]) {
-      if (!hasCol(t, c)) {
-        say(`  ${c} : ${has.has(t) ? `colonne absente de ${t}` : `table ${t} absente`}`);
-        continue;
-      }
-      const s = scope(t);
-      // Séances : nombre avec une durée exploitable (fin > début) et marque « renfo » pour CONFIG.STRENGTH_KINDS.
-      const withEnd = c === 'ACTIVITY_KIND' && hasCol(t, 'START_TIME') && hasCol(t, 'END_TIME');
-      const list = rows(db, `SELECT ${q(c)} AS v, COUNT(*) AS k${withEnd ? ', SUM(END_TIME > START_TIME) AS ok' : ''} FROM ${q(t)} WHERE ${s.sql} GROUP BY ${q(c)} ORDER BY ${q(c)}`, s.p);
-      const item = r => `${code(r.v)} → ${fmt(r.k)}${withEnd ? ` (fin > début : ${fmt(r.ok ?? 0)}${isStrength(r.v) ? ', renfo' : ''})` : ''}`;
-      say(wrap(`  ${c} (${t}) : `, list.length ? list.map(item) : ['aucune ligne']));
+    if (!hasCol(T_WORKOUT, 'ACTIVITY_KIND')) {
+      say(`  ACTIVITY_KIND : ${has.has(T_WORKOUT) ? `colonne absente de ${T_WORKOUT}` : `table ${T_WORKOUT} absente`}`);
+      return;
     }
+    const s = scope(T_WORKOUT);
+    // Séances : nombre avec une fin enregistrée (fin > début) et marque « renfo » pour CONFIG.STRENGTH_KINDS.
+    const withEnd = hasCol(T_WORKOUT, 'START_TIME') && hasCol(T_WORKOUT, 'END_TIME');
+    const list = rows(db, `SELECT ACTIVITY_KIND AS v, COUNT(*) AS k${withEnd ? ', SUM(END_TIME > START_TIME) AS ok' : ''} FROM ${q(T_WORKOUT)} WHERE ${s.sql} GROUP BY ACTIVITY_KIND ORDER BY ACTIVITY_KIND`, s.p);
+    const item = r => `${code(r.v)} → ${fmt(r.k)}${withEnd ? ` (fin > début : ${fmt(r.ok ?? 0)}${isStrength(r.v) ? ', renfo' : ''})` : ''}`;
+    say(wrap(`  ACTIVITY_KIND (${T_WORKOUT}) : `, list.length ? list.map(item) : ['aucune ligne']));
   });
 
   section(`FICHIERS REÇUS DU BRACELET (${T_FILE} : type/sous-type/détail, version → effectif)`, () => {
@@ -1980,25 +1793,23 @@ export function diagnose(db, meta, clock, now) {
     }
   });
 
-  section(`RÉSUMÉS DE SÉANCE (${T_WORKOUT}.RAW_SUMMARY_DATA : sous-type, version, format → effectifs)`, () => {
+  section(`RÉSUMÉS DE SÉANCE (${T_WORKOUT}.RAW_SUMMARY_DATA : sous-type, version → effectifs)`, () => {
     if (!hasCol(T_WORKOUT, 'RAW_SUMMARY_DATA')) {
       say(`  ${has.has(T_WORKOUT) ? 'colonne absente' : 'table absente'}`);
       return;
     }
     if (!blobs.size) say('  aucun résumé');
-    const LAYOUT = { lu: 'disposition documentée', 'désaligné': 'disposition documentée', 'sans-vo2': 'sans champ VO2', 'non-documentée': 'disposition non documentée : VO2 non lue' };
     for (const [id, b] of [...blobs].sort(([a], [z]) => a.localeCompare(z))) {
       if (b.status === 'illisible') {
-        say(`  ${id} (pas un résumé de séance lisible) → ${fmt(b.k)}`);
+        say(`  ${id} (pas un résumé de séance lisible, ou CRC faux) → ${fmt(b.k)}`);
         continue;
       }
-      const parts = [`${id} → ${fmt(b.k)}`, LAYOUT[b.status]];
-      if (b.status === 'lu' || b.status === 'désaligné') {
+      const parts = [`${id} → ${fmt(b.k)}`, b.status === 'sans-vo2' ? 'sans VO2' : 'course ou marche'];
+      if (b.status !== 'sans-vo2') {
         parts.push(`alignés ${fmt(b.read)}`, `désalignés ${fmt(b.misaligned)}`, `VO2 non nulle ${fmt(b.nonzero)}`, `retenue (${CONFIG.VO2_PLAUSIBLE.join(' à ')}) ${fmt(b.kept)}`);
       }
       say(wrap('  ', parts));
     }
-    say('  Format actuel : octet 7 = 0 et CRC32 final ; ancien format (avant le 26/07/2024) : positions − 1.');
   });
 
   section(`${DAYS} DERNIERS JOURS (appareil retenu)`, () => {
@@ -2006,9 +1817,9 @@ export function diagnose(db, meta, clock, now) {
       say("  aucune donnée d'activité");
       return;
     }
-    const widths = [5, 4, 6, 7, 5, 7, 7, 7, 9];
+    const widths = [5, 4, 6, 7, 5];
     const row = cells => `  ${cells[0].padEnd(11)} ${cells.slice(1).map((c, i) => c.padStart(widths[i])).join(' ')}`;
-    say(row(['Jour', 'Éch%', 'FC%', '¼h FC', 'Valide', 'Nuit', 'Durées', 'Stades', 'Résumé', 'FC repos']));
+    say(row(['Jour', 'Éch%', 'FC%', '¼h FC', 'Valide', 'Nuit']));
     for (const d of days) {
       say(row([
         d === days[days.length - 1] ? `${d.key}*` : d.key,
@@ -2017,10 +1828,6 @@ export function diagnose(db, meta, clock, now) {
         String(d.quarters.size),
         yesNo(d.quarters.size >= CONFIG.VALID_DAY_QUARTERS),
         String(d.nights.length),
-        d.nights.length ? yesNo(d.nights.some(x => x.d)) : '—',
-        d.nights.length ? yesNo(d.stages > 0) : '—',
-        yesNo(d.summary),
-        yesNo(d.rest),
       ]));
     }
     say(
@@ -2028,24 +1835,15 @@ export function diagnose(db, meta, clock, now) {
       '  Éch% : minutes ayant un échantillon. FC% : minutes avec une FC valide (30 à 220).',
       `  ¼h FC : quarts d'heure contenant une FC valide (jour valide si ≥ ${CONFIG.VALID_DAY_QUARTERS}).`,
       '  Nuit : sessions de sommeil commençant entre la veille 18:00 et le jour 06:00.',
-      '  Durées : durées de sommeil (stades ou total) > 0. Stades : échantillons de',
-      `  stades pendant ces sessions. Résumé : ligne de ${T_DAILY}`,
-      '  ce jour-là. FC repos : HR_RESTING > 0 ce jour-là.',
       `  Sessions hors nuit (siestes) : ${fmt(naps)}`,
       `  FC valide pendant les sessions de nuit : ${sleepHr.total ? `${pct(sleepHr.valid, sleepHr.total)} % des minutes` : 'aucune session'}`,
     );
   });
 
   section('PRÉSENCE', () => {
-    const stageCols = STAGE_DURATIONS.filter(c => hasCol(T_SLEEP, c));
-    const stageRows = countIn(T_STAGE);
-    const stageSessions = stageCols.length ? countIn(T_SLEEP, `${stageSum(stageCols)} > 0`) : 0;
-    say(`  Stades de sommeil : ${yesNo(stageRows > 0 || stageSessions > 0)} (${fmt(stageRows)} échantillons de stades, ${fmt(stageSessions)} sessions avec durées par stade)`);
-    say(`  HR_RESTING > 0 : ${hasCol(T_DAILY, 'HR_RESTING') ? yesNo(countIn(T_DAILY, 'HR_RESTING > 0') > 0) : 'colonne absente'}`);
     say(`  FC nocturne minute par minute : ${sleepHr.total ? `${pct(sleepHr.valid, sleepHr.total)} % des minutes de sommeil (${DAYS} dernières nuits)` : 'aucune session de nuit'}`);
     const kept = [...blobs.values()].reduce((a, b) => a + b.kept, 0);
     say(`  VO2 max du bracelet (RAW_SUMMARY_DATA) : ${kept ? `${plural(kept, 'séance')} avec une VO2 retenue` : 'aucune VO2 retenue'}`);
-    say(`  VO2 max ailleurs : ${vo2.length ? vo2.join(' ; ') : 'non trouvée (aucune table ni colonne VO2 ; aucune clé VO2 dans SUMMARY_DATA, que Gadgetbridge vide)'}`);
     const workouts = countIn(T_WORKOUT);
     say(`  Séances : ${yesNo(workouts > 0)} (${fmt(workouts)})`);
   });
@@ -2071,10 +1869,8 @@ export function calcDiagnostic(data) {
   const { result: r, info } = data;
   const lines = ['', `CALCUL (méthode ${CONFIG.METHOD_VERSION} ; comptages seulement)`];
   lines.push(`  Jours avec données : ${fmt(info.days)} · valides : ${fmt(r.validDays)} · nuits : ${fmt(info.nights)} · valides : ${fmt(r.validNights)}`);
-  lines.push(`  Sommeil tiré de : stades ${fmt(info.sources[0])}, TOTAL − AWAKE ${fmt(info.sources[1])}, session entière ${fmt(info.sources[2])} (nuits)`);
-  lines.push(`  Unité des durées de sommeil : ${info.unit === 's' ? 'secondes' : 'minutes'} (${info.unitDetected ? 'détectée' : 'par défaut, à confirmer'})`);
-  lines.push(`  FC de repos nocturne (M8, zones) : ${fmt(info.restNights)} / ${plural(info.needRest, 'nuit valide', 'nuits valides')} (au moins ${CONFIG.REST_MIN_SAMPLES} min de FC) · HR_RESTING du bracelet sur ${plural(info.restDays, 'jour')} (tableau 7 jours)`);
-  lines.push(`  Séances : ${fmt(info.workouts)} · avec durée (zones) : ${fmt(info.timed)} · renforcement avec durée : ${fmt(info.strength)} · sans durée : ${fmt(info.strengthUndated)} · VO2 du bracelet retenues : ${fmt(info.vo2)}`);
+  lines.push(`  FC de repos nocturne (M8, zones) : ${fmt(info.restNights)} / ${plural(info.needRest, 'nuit valide', 'nuits valides')} (au moins ${CONFIG.REST_MIN_SAMPLES} min de FC)`);
+  lines.push(`  Séances : ${fmt(info.workouts)} · avec durée (zones) : ${fmt(info.timed)} · renforcement sans durée : ${fmt(info.strengthUndated)} · VO2 du bracelet retenues : ${fmt(info.vo2)}`);
   lines.push(`  Profil utilisable : ${yesNo(info.profileUsable)} · zones cardiaques : ${yesNo(info.zones)} · taille et poids (VO2 estimée) : ${yesNo(info.body)}`);
   const u = r.unlock;
   if (u) lines.push(`  Déblocage : ${fmt(u.nightsIn31)} nuits valides sur les ${CONFIG.UNLOCK_SPAN} dernières (${u.needed} requises) · déjà débloqué : ${yesNo(u.everUnlocked)}`);
@@ -2173,14 +1969,9 @@ export class Fixture {
       VALUES (?, ?, 1, 0, ?, 0, ?)`, [this.unit === 's' ? Math.floor(t / 1000) : t, this.dev, steps, hr]);
   }
 
-  summary(t, rest) {
-    this.run('INSERT INTO XIAOMI_DAILY_SUMMARY_SAMPLE (TIMESTAMP, DEVICE_ID, USER_ID, HR_RESTING) VALUES (?, ?, 1, ?)', [t, this.dev, rest]);
-  }
-
-  sleep({ start, end, intoBed = 0, isAwake = 0, total = 0, deep = 0, light = 0, rem = 0, awake = 0 }) {
-    this.run(`INSERT INTO XIAOMI_SLEEP_TIME_SAMPLE (TIMESTAMP, DEVICE_ID, USER_ID, WAKEUP_TIME, IS_AWAKE, TOTAL_DURATION,
-      DEEP_SLEEP_DURATION, LIGHT_SLEEP_DURATION, REM_SLEEP_DURATION, AWAKE_DURATION, INTO_BED_TIME)
-      VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)`, [start, this.dev, end, isAwake, total, deep, light, rem, awake, intoBed]);
+  // Session de sommeil comme le bracelet la transmet : début et fin seulement.
+  sleep({ start, end }) {
+    this.run('INSERT INTO XIAOMI_SLEEP_TIME_SAMPLE (TIMESTAMP, DEVICE_ID, USER_ID, WAKEUP_TIME) VALUES (?, ?, 1, ?)', [start, this.dev, end]);
   }
 
   // raw : RAW_SUMMARY_DATA (Uint8Array) ; par défaut un octet, comme un résumé illisible.
@@ -2206,11 +1997,10 @@ export class Fixture {
   }
 }
 
-// Résumé binaire de séance au format de Gadgetbridge (CONFIG.VO2_LAYOUTS) : en-tête de fichier (horodatage, fuseau,
-// version, drapeaux type 1 / sous-type / détail 1, octet 7 = 0), début de séance, FC moyenne / max / min et VO2 max
-// à leur position, CRC32 final. legacy : ancien format (sans octet 7 ni CRC). startShift : décalage (s) du début de
-// séance du corps, pour simuler un désalignement.
-export function summaryBlob({ start, subtype = 0x16, version = 5, vo2 = 0, hr = [142, 168, 96], legacy = false, startShift = 0 }) {
+// Résumé binaire de séance au format du bracelet (CONFIG.VO2_LAYOUTS) : en-tête de fichier (horodatage, fuseau,
+// version, drapeaux type 1 / sous-type / détail 1, octet 7 = 0), début et fin de séance, FC moyenne / max / min et
+// VO2 max à leur position, CRC32 final. Par défaut : course en extérieur, version 4.
+export function summaryBlob({ start, end = start, subtype = 0x01, version = 4, vo2 = 0, hr = [142, 168, 96] }) {
   const layout = CONFIG.VO2_LAYOUTS[`${subtype}/${version}`];
   const size = (layout ? layout.vo2 + 1 : 40) + 24;
   const b = new Uint8Array(size);
@@ -2224,37 +2014,21 @@ export function summaryBlob({ start, subtype = 0x16, version = 5, vo2 = 0, hr = 
   b[6] = 0x80 | (subtype << 2) | 1;
   b[7] = 0;
   if (layout) {
-    put32(layout.start, ts + startShift);
+    put32(layout.start, ts);
+    put32(layout.end, Math.floor(end / 1000));
     layout.hr.forEach((i, k) => { b[i] = hr[k]; });
     b[layout.vo2] = vo2;
   }
   put32(size - 4, crc32(b, 0, size - 4));
-  if (!legacy) return b;
-  const old = new Uint8Array(size - 5);
-  old.set(b.subarray(0, 7), 0);
-  old.set(b.subarray(8, size - 4), 7);
-  return old;
+  return b;
 }
 
-// Nuit D : coucher [h, m] la veille (ou le jour D si h < 12), lever [h, m] le jour D ; durées en minutes.
-// source : 'stages' (durées par stade), 'total' (TOTAL et AWAKE seulement), 'span' (aucune durée).
+// Nuit D : coucher [h, m] la veille (ou le jour D si h < 12), lever [h, m] le jour D.
 // hr : FC minute par minute pendant la session (nombre ou fonction de l'instant), sinon aucune.
-export function addNight(fx, cal, key, { bed = [23, 0], wake = [7, 0], sleepMin = 480, awakeMin = 0, intoBedMin = 0, source = 'stages', hr = null }) {
+export function addNight(fx, cal, key, { bed = [23, 0], wake = [7, 0], hr = null }) {
   const start = bed[0] >= 12 ? cal.at(addDays(key, -1), bed[0], bed[1]) : cal.at(key, bed[0], bed[1]);
   const end = cal.at(key, wake[0], wake[1]);
-  const deep = Math.round(sleepMin * 0.2);
-  const rem = Math.round(sleepMin * 0.22);
-  const staged = source === 'stages';
-  fx.sleep({
-    start,
-    end,
-    intoBed: intoBedMin ? start - intoBedMin * MIN : 0,
-    total: source === 'span' ? 0 : sleepMin + awakeMin,
-    deep: staged ? deep : 0,
-    light: staged ? sleepMin - deep - rem : 0,
-    rem: staged ? rem : 0,
-    awake: source === 'span' ? 0 : awakeMin,
-  });
+  fx.sleep({ start, end });
   if (hr !== null) {
     for (let t = start; t < end; t += MIN) fx.minute(t, typeof hr === 'function' ? hr(t) : hr, 0);
   }
@@ -2281,8 +2055,8 @@ export const DEMO_SCENARIOS = ['complet', 'nouveau', 'pause'];
 
 // Base de démonstration jusqu'à `now`. Scénarios :
 // - 'complet' : 200 jours ; séances de renforcement (musculation, HIIT, yoga) et de course (VO2 du bracelet dans
-//   certaines), marches soutenues hors séance, efforts trop courts (non comptés), nuits avec et sans stades, quelques
-//   jours non valides ; habitudes un peu meilleures sur les 30 derniers jours (rythme < 1).
+//   certaines, fin de séance négative comme l'écrit Gadgetbridge), marches soutenues hors séance, efforts trop courts
+//   (non comptés), quelques jours non valides ; habitudes un peu meilleures sur les 30 derniers jours (rythme < 1).
 // - 'nouveau' : 10 nuits, pas encore débloqué : valeur provisoire et sa fiabilité.
 // - 'pause' : débloqué, puis moins de 21 nuits valides sur les 31 derniers jours (bracelet souvent retiré la nuit).
 export function buildDemo(SQL, now, timeZone, scenario = 'complet') {
@@ -2308,18 +2082,12 @@ export function buildDemo(SQL, now, timeZone, scenario = 'complet') {
     if (name === 'complet' && i > 0 && rand() < 0.04) continue;                  // nuit non enregistrée
     const rest = restOf(key) + normal(rand, 0, 1);
     const bedMin = Math.round(normal(rand, 23 * 60 + 10, key >= recentFrom ? 22 : 28));
-    const awakeMin = Math.round(15 + rand() * 10);
     // Lever au plus tard à 09:25 (la nuit du jour est finie quand `now` ≥ 09:30).
-    const sleepMin = Math.min(Math.round(bound(normal(rand, key >= recentFrom ? 432 : 420, 25), 300, 540)), 9 * 60 + 25 + 24 * 60 - bedMin - awakeMin);
-    const wakeMin = bedMin + sleepMin + awakeMin - 24 * 60;
-    const r = rand();
+    const sleepMin = Math.min(Math.round(bound(normal(rand, key >= recentFrom ? 452 : 440, 25), 300, 560)), 9 * 60 + 25 + 24 * 60 - bedMin);
+    const wakeMin = bedMin + sleepMin - 24 * 60;
     addNight(fx, cal, key, {
       bed: [Math.floor(bedMin / 60) % 24, bedMin % 60],
       wake: [Math.floor(wakeMin / 60), wakeMin % 60],
-      sleepMin,
-      awakeMin,
-      intoBedMin: 15,
-      source: i === 0 || r >= 0.16 ? 'stages' : r < 0.08 ? 'span' : 'total',
       hr: () => Math.round(rest + Math.abs(normal(rand, 0, 4))),
     });
   }
@@ -2340,7 +2108,6 @@ export function buildDemo(SQL, now, timeZone, scenario = 'complet') {
     const [h0, h1] = partial ? [9, 13] : [7, 23];
     for (let t = cal.at(key, h0, 15); t < cal.at(key, h1); t += 15 * MIN) fx.minute(t, hrIn(66, 80), 0);
     fx.minute(cal.at(key, 12, 7), hrIn(70, 85), Math.round(bound(normal(rand, recent ? 7900 : 7400, 1300), 2500, 16000)));
-    fx.summary(cal.at(key, 22), Math.round(restOf(key) + 2));
     if (name === 'nouveau' && i > 7) continue;
     vo2 += 0.012;
     // Course (mardi, samedi) : échauffement, zones 2-3, fin en zone 4-5 ; VO2 du bracelet dans environ 1 course sur 3.
@@ -2349,7 +2116,8 @@ export function buildDemo(SQL, now, timeZone, scenario = 'complet') {
       const minutes = 30 + Math.floor(rand() * 16);
       effort(start, minutes, m => (m < 5 ? hrIn(105, 118) : m >= minutes - 6 ? hrIn(z.high + 2, z.high + 9) : hrIn(z.low + 10, z.high - 6)));
       const v = rand() < 0.35 ? Math.round(vo2 + normal(rand, 0, 0.6)) : 0;
-      fx.workout({ start, end: start + minutes * MIN, kind: OUTDOOR_RUNNING, raw: summaryBlob({ start, vo2: v, hr: [144, Math.round(z.high + 9), 104] }) });
+      const end = start + minutes * MIN;
+      fx.workout({ start, end: -start, kind: OUTDOOR_RUNNING, raw: summaryBlob({ start, end, vo2: v, hr: [144, Math.round(z.high + 9), 104] }) });
     }
     // Musculation (lundi) : FC surtout sous la zone 1, quelques séries au-dessus.
     if (wd === 1 && rand() < (recent ? 0.95 : 0.8)) {

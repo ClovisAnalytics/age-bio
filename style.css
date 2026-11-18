@@ -276,7 +276,6 @@ button { font: inherit; color: inherit; }
 .btn-primary { background: var(--btn-bg); color: var(--btn-fg); }
 .btn-secondary { width: 100%; margin-top: 16px; background: var(--surface-2); color: var(--text); }
 .btn .icon { width: 20px; height: 20px; }
-.chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .chip {
   display: inline-flex;
   align-items: center;
@@ -292,11 +291,6 @@ button { font: inherit; color: inherit; }
   white-space: nowrap;
 }
 .chip-warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn-text); }
-.chip-plain { background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--text-3); }
-.chip-btn { position: relative; cursor: pointer; background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--text-2); }
-.chip-btn::after { content: ""; position: absolute; inset: -10px -2px; }
-.chip-rel { padding-left: 6px; }
-.chip-rel .icon { width: 16px; height: 16px; margin-right: 5px; stroke-width: 2.2; }
 .chip-preview { height: 22px; }
 .link-cta {
   all: unset;
@@ -358,7 +352,6 @@ button { font: inherit; color: inherit; }
 }
 .sec-title { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.01em; }
 .sec-aside { font-size: 13px; color: var(--text-3); }
-.sec-lede { margin: -4px 4px 12px; font-size: 14px; line-height: 1.45; color: var(--text-2); }
 .legend { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 13px; color: var(--text-2); white-space: nowrap; }
 .legend-sep { width: 1px; height: 18px; margin: 0 5px; background: var(--line); }
 .tri { display: inline-block; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; }
@@ -459,6 +452,27 @@ a.card:focus-visible { outline-offset: 3px; }
 @keyframes twinkle { 50% { opacity: .12; } }
 @keyframes breathe { 50% { transform: scale(1.012); } }
 .hero-meta { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-top: 16px; }
+/* Ligne discrète sous l'orbe : âge civil · intervalle · fiabilité (bouton vers sa fiche). */
+.hero-line { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; margin: 0; font-size: 13px; line-height: 1.6; color: var(--text-3); }
+.hero-line > * + *::before { content: "·"; display: inline-block; margin: 0 8px; color: var(--text-3); }
+.meta-btn {
+  all: unset;
+  position: relative;
+  color: var(--text-2);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.meta-btn::after { content: ""; position: absolute; inset: -12px -4px; }
+.meta-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+/* « À venir » : une ligne par fonction pas encore disponible. */
+.soon { width: fit-content; max-width: 100%; margin: 18px auto 0; }
+.soon-list { margin: 0; padding: 0; list-style: none; }
+.soon-list li { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 3px 0; font-size: 13px; line-height: 1.4; color: var(--text-3); white-space: nowrap; }
+.soon-list .icon { width: 14px; height: 14px; stroke-width: 2; }
+.soon-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+.soon-when { flex: none; }
+.soon-when::before { content: "·"; margin-right: 8px; }
 .preview {
   all: unset;
   box-sizing: border-box;
@@ -776,6 +790,7 @@ body:not([data-screen="age"]) .compact { display: none; }
 .dial-val { position: relative; display: flex; align-items: baseline; }
 .dial-val b { font-size: 27px; font-weight: 700; }
 .dial-val small { margin-left: 1px; font-size: 14px; font-weight: 700; }
+.dial-val.is-soon { font-size: 14px; font-weight: 600; color: var(--text-3); }
 .dial-label { display: inline-flex; align-items: center; gap: 1px; font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
 .dial-label .icon { width: 14px; height: 14px; stroke-width: 2.4; color: var(--text-2); }
 .dial-sleep { --ring-c: var(--sleep); }
@@ -805,7 +820,6 @@ body:not([data-screen="age"]) .compact { display: none; }
 .night-icon .icon { width: 22px; height: 22px; }
 .night-dur { display: block; font-size: 30px; font-weight: 700; line-height: 1.1; }
 .night-span { display: block; font-size: 13px; color: var(--text-3); }
-.avg-card .card-title { color: var(--text-2); }
 .dash { margin: 0 0 12px; padding: 0; list-style: none; overflow: hidden; }
 .dash-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 64px; padding: 12px 16px; }
 .dash-row + .dash-row { border-top: 1px solid var(--line); }

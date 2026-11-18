@@ -16,7 +16,7 @@ const query = new URLSearchParams(location.search);
 const DEMO = query.has('demo') ? (query.get('demo') || 'complet') : null;
 const motion = matchMedia('(prefers-reduced-motion: reduce)');
 const calm = () => motion.matches;
-const IDS = ['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9'];
+const IDS = ['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8'];
 const STALE_MS = 26 * 3600000;   // export « ancien » au-delà de 26 h (comme en v1)
 
 window.__uiErrors = 0;            // compteur d'erreurs JS, lu par la vérification automatique
@@ -26,7 +26,6 @@ const state = {
   diagText: '',        // Diagnostic complet (structure + calcul) : jamais de profil ni de valeur de santé
   diagProfile: null,   // profil lu par le Diagnostic (affiché dans « Plus » seulement)
   loadedAt: 0,         // instant du chargement de l'export
-  readSecs: 0,
   week: null,          // index du dimanche affiché sur Âge bio (null : valeur officielle)
   open: new Set(),     // lignes d'indicateur dépliées
   busy: false,
@@ -148,8 +147,6 @@ const ICON = {
   copy: 'M9 9h10.5v11.5H9zM5 15.5V4h11',
   moon: 'M19.5 14.6A8 8 0 0 1 9.4 4.5a8 8 0 1 0 10.1 10.1z',
   clock: 'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17zM12 7.5V12l3 2',
-  bed: 'M3 6v13M3 15h18v4M21 15v-2.5a2.5 2.5 0 0 0-2.5-2.5H10v5M6.5 13a1.75 1.75 0 1 0 0-3.5 1.75 1.75 0 0 0 0 3.5z',
-  wave: 'M3 12.5c2.2-5 4.3-5 6 0s3.8 5 6 0 3.8-5 6 0',
   doc: 'M7 3h7l5 5v13H7zM14 3v5h5M10 13h6M10 17h6',
   pulse: 'M3 12h4l2.5-6 4 12 2.5-6H21',
   upload: 'M12 15V4M7.5 8.5 12 4l4.5 4.5M5 14v5.5h14V14',
@@ -177,54 +174,50 @@ const fastMark = () => s('svg', { class: 'pace-mark is-fast', viewBox: '0 0 24 2
 const GROUPS = [
   { key: 'sleep', title: 'Sommeil', ids: ['M2', 'M1'] },
   { key: 'activity', title: 'Activité', ids: ['M3', 'M4', 'M5', 'M6'] },
-  { key: 'fitness', title: 'Forme', ids: ['M7', 'M8', 'M9'] },
+  { key: 'fitness', title: 'Forme', ids: ['M7', 'M8'] },
 ];
 const durParts = v => (Math.round(v) < 60 ? [int(v), 'min'] : [hm(v), '']);
+// short : nom dans la liste « À venir » (une ligne par élément, même sur téléphone).
 const IND = {
   M1: {
-    name: 'Durée du sommeil', group: 'sleep', icon: 'moon', range: [4, 10], ends: ['4 h', '10 h'],
+    name: 'Durée du sommeil', short: 'durée du sommeil', group: 'sleep', icon: 'moon', range: [4, 10], ends: ['4 h', '10 h'],
     fmt: v => [hm(v * 60), ''], x: x => `${nfx.format(x)} h`, src: 'Yin 2017',
-    what: 'Moyenne de ton sommeil effectif par nuit valide (au moins 3 h de sommeil).',
+    what: 'Moyenne de la durée de tes nuits valides (au moins 3 h), du coucher au lever.',
   },
   M2: {
-    name: 'Régularité du sommeil', group: 'sleep', icon: 'clock', range: [40, 100], ends: ['40 %', '100 %'],
+    name: 'Régularité du sommeil', short: 'régularité du sommeil', group: 'sleep', icon: 'clock', range: [40, 100], ends: ['40 %', '100 %'],
     fmt: v => [int(v), '%'], x: x => `${nfx.format(x)} %`, src: 'Windred 2024',
     what: "Chaque nuit, écart de tes heures de coucher et de lever avec les 4 nuits précédentes, les plus récentes pesant plus : aucun écart vaut 100 %, 2 h d'écart moyen valent 0 %.",
   },
   M3: {
-    name: 'Activité modérée (sem.)', group: 'activity', icon: 'pulse', range: [0, 300], ends: ['0', '5 h'],
+    name: 'Activité modérée (sem.)', short: 'activité', group: 'activity', icon: 'pulse', range: [0, 300], ends: ['0', '5 h'],
     fmt: durParts, x: x => `${nfx.format(x)} min`, src: 'Arem 2015 ; OMS 2020',
     what: "Minutes par semaine en zones cardiaques 1 à 3 (50 à 80 % de ta réserve cardiaque), pendant une activité : séance enregistrée ou au moins 15 minutes d'affilée.",
   },
   M4: {
-    name: 'Activité vigoureuse (sem.)', group: 'activity', icon: 'bolt', range: [0, 75], ends: ['0', '1 h 15'],
+    name: 'Activité vigoureuse (sem.)', short: 'activité', group: 'activity', icon: 'bolt', range: [0, 75], ends: ['0', '1 h 15'],
     fmt: durParts, x: x => `${nfx.format(x)} min`, src: 'Wang 2021',
     what: 'Minutes par semaine en zones cardiaques 4 et 5 (au-delà de 80 % de ta réserve cardiaque), pendant une activité.',
   },
   M5: {
-    name: 'Renforcement (sem.)', group: 'activity', icon: 'dumbbell', range: [0, 150], ends: ['0', '2 h 30'],
+    name: 'Renforcement (sem.)', short: 'renforcement', group: 'activity', icon: 'dumbbell', range: [0, 150], ends: ['0', '2 h 30'],
     fmt: durParts, x: x => `${nfx.format(x)} min`, src: 'Momma 2022',
     what: 'Durée par semaine de tes séances de renforcement, yoga, pilates, HIIT et cross training enregistrées sur le bracelet.',
   },
   M6: {
-    name: 'Pas (par jour)', group: 'activity', icon: 'steps', range: [0, 16000], ends: ['0', '16 k'],
+    name: 'Pas (par jour)', short: 'pas', group: 'activity', icon: 'steps', range: [0, 16000], ends: ['0', '16 k'],
     fmt: v => [int(v), 'pas'], x: x => `${nf0.format(x)} pas`, src: 'Paluch 2022',
     what: 'Moyenne de tes pas par jour valide.',
   },
   M7: {
-    name: 'VO2 max', group: 'fitness', icon: 'heart', range: [15, 70], ends: ['15', '70'],
+    name: 'VO2 max', short: 'VO2 max', group: 'fitness', icon: 'heart', range: [15, 70], ends: ['15', '70'],
     fmt: v => [nf1.format(round1(v)), 'ml/kg/min'], x: x => `${nfx.format(x)} ml/kg/min`, src: 'Kodama 2009 ; Jurca 2005',
-    what: "Consommation maximale d'oxygène, mesurée par le bracelet pendant une course ou une marche en extérieur.",
+    what: "Consommation maximale d'oxygène, calculée par le bracelet après une course d'au moins 10 min en extérieur : moyenne de ses mesures.",
   },
   M8: {
-    name: 'FC de repos', group: 'fitness', icon: 'heart', range: [40, 90], ends: ['40 bpm', '90 bpm'],
+    name: 'FC de repos', short: 'FC de repos', group: 'fitness', icon: 'heart', range: [40, 90], ends: ['40 bpm', '90 bpm'],
     fmt: v => [int(v), 'bpm'], x: x => `${nfx.format(x)} bpm`, src: 'Zhang 2016',
     what: 'Ta fréquence cardiaque au repos pendant la nuit : moyenne de la moitié la plus basse des mesures de chaque nuit.',
-  },
-  M9: {
-    name: 'Masse maigre', group: 'fitness', icon: 'user', range: [60, 90], ends: ['60 %', '90 %'],
-    fmt: v => [nf1.format(round1(v)), '%'], x: x => `${nfx.format(x)} %`, src: '—',
-    what: 'Part de ta masse corporelle hors graisse ; elle demande une balance à impédance ou un examen DEXA.',
   },
 };
 const valText = (id, v) => IND[id].fmt(v).filter(Boolean).join(NBSP);
@@ -303,7 +296,7 @@ function changeSentence(m) {
 function verdict(ind) {
   if (!ind.present) return null;
   if (!finite(ind.delta30) || !finite(ind.value30)) {
-    return { title: 'Moyenne sur 6 mois', text: 'Pas assez de mesures sur les 30 derniers jours pour comparer.' };
+    return { title: 'Moyenne sur 6 mois', text: 'Pas de comparaison sur 30 jours pour l\'instant.' };
   }
   const diff = ind.delta30 - ind.delta;
   if (diff <= -0.25) return { title: 'Gros progrès', text: 'Tes 30 derniers jours font nettement mieux que ta moyenne sur 6 mois : continue, ton âge bio baissera avec le temps.' };
@@ -316,11 +309,12 @@ function verdict(ind) {
 const POINT_WORD = { M1: 'nuit', M2: 'nuit', M8: 'nuit', M3: 'jour', M4: 'jour', M5: 'jour', M6: 'jour' };
 function provisionalVerdict(ind) {
   if (!ind.present) return null;
-  return { title: 'Valeur provisoire', text: `Moyenne de ${plural(ind.points ?? 0, POINT_WORD[ind.id] ?? 'mesure')} : elle se précise à chaque synchro.` };
+  return { title: 'Valeur provisoire', text: `Moyenne de ${plural(ind.points ?? 0, POINT_WORD[ind.id] ?? 'mesure')}.` };
 }
+// Indicateur absent : « Disponible dans 4 jours valides. » ou la raison (« Après une course d'au moins 10 min… »).
 function absentText(ind) {
-  if (ind.id === 'M9' || (ind.id === 'M7' && !ind.estimated)) return 'Pas mesurée par le bracelet : sans effet sur ton âge bio.';
-  return ind.reason ? `${capital(ind.reason)} : sans effet sur ton âge bio.` : 'Pas assez de mesures : sans effet sur ton âge bio.';
+  if (!ind.reason) return 'Pas assez de mesures.';
+  return ind.wait ? `Disponible ${ind.reason}.` : `${capital(ind.reason)}.`;
 }
 const capital = t => t.charAt(0).toUpperCase() + t.slice(1);
 const LEVER_LABEL = {
@@ -342,7 +336,7 @@ function pointIndicators(pt, off) {
     const d = pt.deltas?.[id];
     const present = finite(v) && ref.present !== false;
     return {
-      id, group: IND[id].group, present, estimated: Boolean(ref.estimated) && !ref.present, reason: ref.reason,
+      id, group: IND[id].group, present, estimated: Boolean(ref.estimated) && !ref.present, reason: ref.reason, wait: ref.wait,
       value6m: finite(v) ? v : null, value30: null, delta: finite(d) ? d : 0, delta30: null,
       target: null, status: statusOf(present, finite(d) ? d : 0),
     };
@@ -410,7 +404,6 @@ const secHead = (title, id, legend = false, extra = null) => h('div', { class: '
     : legend ? h('p', { class: 'legend', 'aria-hidden': 'true' },
       h('span', { class: 'tri tri-down' }), 'Moy. 6 mois', h('span', { class: 'legend-sep' }), h('span', { class: 'tri tri-up' }), 'Moy. 30 j') : null,
   extra);
-const sheetCta = (text, sheet) => h('button', { class: 'link-cta', type: 'button', 'data-sheet': sheet }, h('span', null, text), icon('arrow'));
 const linkCta = (text, href, attrs = {}) => h('a', { class: 'link-cta', href, ...attrs }, h('span', null, text), icon('arrow'));
 const note = (text, cls = '') => h('p', { class: `note ${cls}`.trim() }, text);
 
@@ -625,7 +618,7 @@ function impactEl(ind) {
 }
 function rowLabel(ind, cap = 'moyenne 6 mois') {
   const name = IND[ind.id].name;
-  if (!ind.present && !(ind.estimated && finite(ind.value6m))) return `${name} : non mesuré. ${absentText(ind)}`;
+  if (!ind.present && !(ind.estimated && finite(ind.value6m))) return `${name} : ${absentText(ind)}`;
   const parts = [`${name} : ${cap} ${valText(ind.id, ind.value6m)}`];
   if (ind.present && finite(ind.value30)) parts.push(`moyenne 30 jours ${valText(ind.id, ind.value30)}`);
   parts.push(ind.present ? `impact ${signed1(ind.delta)} ${yearWord(ind.delta)} sur ton âge bio` : 'valeur estimée, non comptée dans ton âge bio');
@@ -642,7 +635,7 @@ function indRow(ind, m) {
   const head = h('button', { class: 'ind-head', type: 'button', 'aria-expanded': String(open), 'aria-controls': moreId, 'aria-label': rowLabel(ind, capLong) },
     h('span', { class: 'ind-top', 'aria-hidden': 'true' },
       h('span', { class: 'ind-name' }, IND[id].name),
-      absent ? chip('Non mesuré') : estimated ? chip('Estimée') : null,
+      absent ? chip(ind.wait ? 'Bientôt' : 'Non mesuré') : estimated ? chip('Estimée') : null,
       icon('down', 'ind-chev')),
     absent
       ? h('span', { class: 'ind-body', 'aria-hidden': 'true' }, h('span', { class: 'ind-reason' }, absentText(ind)), impactEl(ind))
@@ -652,7 +645,7 @@ function indRow(ind, m) {
   const more = h('div', { class: 'ind-more', id: moreId },
     h('div', { class: 'ind-more-in' },
       v ? h('h4', { class: 'ind-verdict' }, v.title) : null,
-      h('p', { class: 'ind-text' }, v ? v.text : estimated ? ind.reason ?? 'Valeur estimée, affichée pour information : sans effet sur ton âge bio.' : absent ? IND[id].what : `Moyenne des 6 mois qui finissent le ${dayMonth(m.key)}, sans comparaison sur 30 jours.`),
+      h('p', { class: 'ind-text' }, v ? v.text : estimated ? capital(ind.reason ?? 'estimation sans effort, non comptée') + '.' : absent ? IND[id].what : `Moyenne des 6 mois qui finissent le ${dayMonth(m.key)}.`),
       finite(target) && !absent ? h('p', { class: 'ind-target' }, `Neutre pour ton profil : ${valText(id, target)}.`) : null,
       linkCta(m.provisional ? 'Voir le détail' : 'Voir la tendance', `#indicateur/${id}`)));
   more.inert = !open;
@@ -787,14 +780,13 @@ function renderAge() {
   else {
     const reveal = state.reveal;
     state.reveal = false;
-    kids.push(h('div', { class: 'hero' }, m.provisional ? dayHead(m) : weekNav(m), orbFigure(m, { count: reveal }), heroChips(m)),
-      paceSection(m, reveal), m.provisional ? provisionalCallout(m, r) : callout(m),
+    kids.push(h('div', { class: 'hero' }, m.provisional ? dayHead(m) : weekNav(m), orbFigure(m, { count: reveal }), heroMeta(m)),
+      m.official || m.provisional ? upcomingList(r, m) : null,
+      paceSection(m, reveal), m.provisional ? null : callout(m),
       ...GROUPS.map(g => indSection(g, m)),
       m.official || m.provisional ? leversSection(r) : null,
       trendSection(r.curve ?? []),
-      note(m.provisional
-        ? `Valeur provisoire au ${dayMonth(m.key)}, sur tes données disponibles. Estimation personnelle, pas un avis médical.`
-        : `Calculé jusqu'au dimanche ${dayMonth(m.key)}, sur 182 jours. Estimation personnelle, pas un avis médical.`, 'page-foot'));
+      note('Estimation personnelle, pas un avis médical.', 'page-foot'));
   }
   fill(view, kids);
   renderCompact(m);
@@ -812,8 +804,8 @@ function ageEmpty(kind) {
 function ageWaiting(r) {
   return h('div', { class: 'empty' }, h('span', { class: 'empty-icon' }, icon('orb')),
     h('p', { class: 'empty-title' }, 'Ton âge bio arrive'),
-    h('p', { class: 'empty-text' }, "Il s'affiche dès ta première nuit valide (au moins 3 h de sommeil) ou ta première journée valide (16 h avec le bracelet), avec un score de fiabilité qui grandit à chaque synchro."),
-    note(`${plural(r.validNights ?? 0, 'nuit valide', 'nuits valides')} et ${plural(r.validDays ?? 0, 'jour valide', 'jours valides')} dans cet export. En attendant, ta dernière nuit et tes 7 derniers jours sont dans « Aujourd'hui ».`));
+    h('p', { class: 'empty-text' }, "Dès ta première nuit valide (3 h de sommeil) ou journée valide (16 h avec le bracelet)."),
+    note(`${plural(r.validNights ?? 0, 'nuit valide', 'nuits valides')} et ${plural(r.validDays ?? 0, 'jour valide', 'jours valides')} dans cet export.`));
 }
 // En-tête de la valeur provisoire, à la place de la navigation par semaine : jour du calcul.
 function dayHead(m) {
@@ -829,34 +821,61 @@ function weekNav(m) {
     h('p', { class: 'week-label', 'aria-live': 'polite' }, h('span', { class: 'visually-hidden' }, 'Semaine du '), weekLabel(m.key)),
     h('button', { class: 'icon-btn', type: 'button', 'data-week': '1', disabled: !nextKey, 'aria-label': nextKey ? `Semaine suivante, ${weekLabel(nextKey)}` : 'Pas de semaine suivante' }, icon('next')));
 }
-// Fiabilité : bouton « i » vers sa fiche pour la valeur affichée, simple pastille pour un dimanche passé.
-function relChip(m) {
-  const text = `Fiabilité ${relText(m.reliability.score)}`;
-  if (!m.official && !m.provisional) return chip(text, 'chip-plain');
-  return h('button', { class: 'chip chip-btn chip-rel', type: 'button', 'data-sheet': 'fiabilite', 'aria-label': `${text} : comprendre la fiabilité` },
-    icon('info'), text);
-}
-function heroChips(m) {
+// Sous l'orbe, une ligne discrète : âge civil · intervalle · fiabilité (touche : sa fiche) ; « En pause » en pastille.
+function heroMeta(m) {
   const off = m.off;
-  const kids = [];
-  if (m.provisional) kids.push(chip('Provisoire'));
-  if (m.paused) kids.push(chip('En pause', 'chip-warn'));
-  if (finite(m.reliability?.score)) kids.push(relChip(m));
-  else if (m.calibrating) kids.push(chip(m.official && finite(off.validDays) ? `Calibrage ${int(Math.min(off.validDays, 90))}/90 j` : 'Calibrage'));
-  if (finite(m.civil)) kids.push(h('span', { class: 'chip chip-plain' }, `Âge civil ${nf1.format(round1(m.civil))}`));
+  const items = [];
+  if (m.paused) items.push(chip('En pause', 'chip-warn'));
+  if (finite(m.civil)) items.push(h('span', null, `Âge civil ${nf1.format(round1(m.civil))}`));
   if (m.official && finite(off.interval?.lo) && finite(off.interval?.hi)) {
-    kids.push(h('button', { class: 'chip chip-btn', type: 'button', 'data-sheet': 'age', 'aria-label': `Précision : intervalle à 95 % de ${fmtAge(off.interval.lo)} à ${fmtAge(off.interval.hi)} ans` },
+    items.push(h('button', { class: 'meta-btn', type: 'button', 'data-sheet': 'age', 'aria-label': `Précision : intervalle à 95 % de ${fmtAge(off.interval.lo)} à ${fmtAge(off.interval.hi)} ans` },
       `${fmtAge(off.interval.lo)} – ${fmtAge(off.interval.hi)}`));
+  }
+  if (finite(m.reliability?.score)) {
+    const text = `Fiabilité ${relText(m.reliability.score)}`;
+    items.push(m.official || m.provisional
+      ? h('button', { class: 'meta-btn', type: 'button', 'data-sheet': 'fiabilite', 'aria-label': `${text} : en savoir plus` }, text)
+      : h('span', null, text));
+  } else if (m.calibrating) {
+    items.push(h('span', null, m.official && finite(off.validDays) ? `Calibrage ${int(Math.min(off.validDays, 90))}/90 j` : 'Calibrage'));
   }
   const pv = state.data.result.preview;
   const preview = m.official && pv && finite(pv.bio) && pv.key !== off.key
-    ? h('button', { class: 'preview', type: 'button', 'data-sheet': 'apercu', 'aria-label': `Aperçu du jour : ${fmtAge(pv.bio)} ans, rythme ${num1(pv.pace?.value ?? 0)} fois. Valeur provisoire, la valeur officielle arrive dimanche.` },
+    ? h('button', { class: 'preview', type: 'button', 'data-sheet': 'apercu', 'aria-label': `Aperçu du jour : ${fmtAge(pv.bio)} ans${finite(pv.pace?.value) ? `, rythme ${num1(pv.pace.value)} fois` : ''}. La valeur officielle arrive dimanche.` },
       chip('Aperçu du jour', 'chip-preview'),
       h('span', { class: 'preview-val' }, h('b', { class: 'num' }, fmtAge(pv.bio)), ' ans',
         finite(pv.pace?.value) ? [h('span', { class: 'dot-sep' }, '·'), h('b', { class: 'num' }, fmtPace(pv.pace.value))] : null),
       h('span', { class: `preview-delta ${impactCls(pv.bio - off.bio)}` }, `${signed1(pv.bio - off.bio)} ${yearWord(pv.bio - off.bio)} depuis dimanche`))
     : null;
-  return h('div', { class: 'hero-meta' }, kids.length ? h('div', { class: 'chips' }, kids) : null, preview);
+  return h('div', { class: 'hero-meta' }, items.length ? h('p', { class: 'hero-line' }, items) : null, preview);
+}
+// « À venir » : ce qui n'est pas encore disponible, une ligne par élément (quand, ou comment), le plus proche d'abord.
+const UPCOMING = { official: 'Valeur officielle', pace: 'Rythme de vieillissement' };
+// « durée du sommeil », « activité », « renforcement » → « Durée du sommeil, activité et renforcement » (sans doublon).
+const listFr = names => {
+  const u = [...new Set(names)];
+  return capital(u.length > 1 ? `${u.slice(0, -1).join(', ')} et ${u[u.length - 1]}` : u[0]);
+};
+function upcomingList(r, m) {
+  const items = (r.upcoming ?? []).map(u => ({
+    what: UPCOMING[u.id] ?? u.id,
+    when: u.date ? `le ${dayMonth(u.date)}` : `dans ${plural(u.count, ...u.unit)}`,
+    at: u.date ?? addDays(r.lastKey, u.count),
+  }));
+  // Indicateurs absents, regroupés par raison (« dans 4 jours valides » : activité et renforcement).
+  const groups = new Map();
+  for (const ind of m.indicators ?? []) {
+    if (ind.present || ind.estimated || !ind.reason || !IND[ind.id]) continue;
+    if (!groups.has(ind.reason)) groups.set(ind.reason, { names: [], wait: ind.wait });
+    groups.get(ind.reason).names.push(IND[ind.id].short);
+  }
+  for (const [reason, g] of groups) {
+    items.push({ what: listFr(g.names), when: reason, at: g.wait ? addDays(r.lastKey, g.wait) : '9999' });
+  }
+  if (!items.length) return null;
+  items.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+  return h('section', { class: 'soon', 'aria-label': 'À venir' },
+    h('ul', { class: 'soon-list' }, items.map(x => h('li', null, icon('lock'), h('span', { class: 'soon-what' }, x.what), h('span', { class: 'soon-when' }, x.when)))));
 }
 function paceSection(m, animate) {
   if (!finite(m.pace)) return null;
@@ -872,31 +891,13 @@ function callout(m) {
     const u = r.unlock ?? {};
     return h('div', { class: 'callout callout-pause' },
       h('h3', { class: 'callout-title' }, 'Mises à jour en pause'),
-      h('p', { class: 'callout-text' }, `Il faut ${u.needed ?? 21} nuits valides sur les 31 derniers jours ; tu en as ${u.nightsIn31 ?? m.off.nightsIn31 ?? '—'}. Encore ${plural(u.nightsToGo ?? 0, 'nuit')} pour reprendre. Valeur affichée : ${longDay(m.key)}.`),
-      linkCta('Voir ce qui joue le plus', '#age', { 'data-scroll': 'levers' }));
+      h('p', { class: 'callout-text' }, `Il faut ${u.needed ?? 21} nuits valides sur les 31 derniers jours ; tu en as ${u.nightsIn31 ?? m.off.nightsIn31 ?? '—'} : encore ${plural(u.nightsToGo ?? 0, 'nuit')}.`));
   }
-  const parts = [changeSentence(m), paceSentence(m.pace)];
-  const lever = m.official ? (r.levers ?? [])[0] : null;
-  if (lever) parts.push(`Levier principal : ${(lever.label || LEVER_LABEL[lever.id] || IND[lever.id]?.name || '').toLowerCase()}, ${MINUS}${dec1(lever.gain)} ${yearWord(lever.gain)}.`);
+  const pace = finite(m.pace);
   return h('div', { class: 'callout' },
-    h('h3', { class: 'callout-title' }, paceTitle(m.pace)),
-    h('p', { class: 'callout-text' }, parts.join(' ')),
-    m.official
-      ? linkCta('Voir ce qui joue le plus', '#age', { 'data-scroll': 'levers' })
-      : h('button', { class: 'link-cta', type: 'button', 'data-week': 'latest' }, h('span', null, 'Revenir à cette semaine'), icon('arrow')));
-}
-// Encart de la valeur provisoire : sur quoi elle repose, quand la valeur officielle prend le relais.
-function provisionalCallout(m, r) {
-  const rel = m.reliability ?? {};
-  const u = r.unlock ?? {};
-  const togo = u.nightsToGo ?? 0;
-  const next = togo > 0
-    ? `La valeur officielle, mise à jour chaque dimanche, prendra le relais après ${u.needed ?? 21} nuits valides sur 31 jours : encore ${plural(togo, 'nuit')}.`
-    : 'La valeur officielle, mise à jour chaque dimanche, prendra le relais dimanche.';
-  return h('div', { class: 'callout' },
-    h('h3', { class: 'callout-title' }, 'Elle se précise chaque jour'),
-    h('p', { class: 'callout-text' }, `Mêmes barèmes que la valeur officielle, sur ${plural(rel.validNights ?? 0, 'nuit valide', 'nuits valides')} et ${plural(rel.validDays ?? 0, 'jour valide', 'jours valides')} pour l'instant : fiabilité ${relText(rel.score)}, elle peut encore bouger nettement. ${next}`),
-    sheetCta('Comprendre la fiabilité', 'fiabilite'));
+    h('h3', { class: 'callout-title' }, pace ? paceTitle(m.pace) : 'Cette semaine'),
+    h('p', { class: 'callout-text' }, pace ? `${changeSentence(m)} ${paceSentence(m.pace)}` : changeSentence(m)),
+    m.official ? null : h('button', { class: 'link-cta', type: 'button', 'data-week': 'latest' }, h('span', null, 'Revenir à cette semaine'), icon('arrow')));
 }
 function indSection(g, m) {
   const list = g.ids.map(id => m.indicators.find(x => x.id === id) ?? { id, present: false, reason: '', delta: 0 });
@@ -917,12 +918,10 @@ function leversSection(r) {
         h('span', { class: 'lever-gain' }, h('b', { class: 'num' }, `${MINUS}${dec1(l.gain)}`), h('small', null, yearWord(l.gain))),
         icon('next', 'lever-chev'));
     })
-    : [h('p', { class: 'lever-none' }, "Aucun pas réaliste ne ferait gagner plus d'un mois : tes comportements sont déjà au mieux des barèmes.")];
+    : [h('p', { class: 'lever-none' }, "Aucun pas réaliste ne ferait gagner plus d'un mois.")];
   return h('section', { class: 'section', id: 'levers', 'aria-labelledby': 'levers-title' },
     secHead('Ce qui joue le plus', 'levers-title'),
-    h('p', { class: 'sec-lede' }, 'Et si tu progressais d\'un pas ? Gain estimé sur ton âge bio, à habitudes égales par ailleurs.'),
-    h('div', { class: 'card levers' }, items),
-    note('Estimations tirées des mêmes barèmes : un ordre de grandeur, pas une promesse.'));
+    h('div', { class: 'card levers' }, items));
 }
 function trendSection(curve) {
   if (!curve.length) return null;
@@ -983,15 +982,20 @@ function renderToday() {
   const last = r.sleep?.last ?? null;
   const off = r.official ?? null;
   const band = (x, a, b) => (!finite(x) ? '' : x < a ? 'is-bad' : x < b ? 'is-mid' : 'is-good');
-  const dial = ({ label, main, unit, frac, cls, href, aria }) => h('a', { class: `dial ${cls}`, href, 'aria-label': aria },
+  // soon : date de déblocage écrite en petit dans le cadran, à la place de la valeur.
+  const dial = ({ label, main, unit, frac, cls, href, aria, soon = null }) => h('a', { class: `dial ${cls}`, href, 'aria-label': aria },
     h('span', { class: 'dial-ring' }, ring(92, 6, frac),
-      h('span', { class: 'dial-val' }, h('b', { class: 'num' }, main), unit ? h('small', null, unit) : null)),
+      soon ? h('span', { class: 'dial-val is-soon' }, soon)
+        : h('span', { class: 'dial-val' }, h('b', { class: 'num' }, main), unit ? h('small', null, unit) : null)),
     h('span', { class: 'dial-label' }, label, icon('next')));
   const pace = off?.pace?.value ?? r.provisional?.pace?.value;
+  const paceDate = finite(pace) ? null : (r.upcoming ?? []).find(u => u.id === 'pace')?.date ?? null;
   const dials = h('div', { class: 'dials' },
     dial({ label: 'Sommeil', main: last ? int(last.performance) : '—', unit: last ? '%' : '', frac: last ? last.performance / 100 : 0, cls: 'dial-sleep', href: '#sommeil', aria: last ? `Sommeil : performance ${pct(last.performance)} la dernière nuit` : 'Sommeil : aucune nuit valide' }),
     dial({ label: 'Régularité', main: finite(last?.regularity) ? int(last.regularity) : '—', unit: finite(last?.regularity) ? '%' : '', frac: finite(last?.regularity) ? last.regularity / 100 : 0, cls: `dial-reg ${band(last?.regularity, 70, 85)}`, href: '#sommeil', aria: finite(last?.regularity) ? `Régularité : ${pct(last.regularity)} la dernière nuit` : 'Régularité : pas encore calculée' }),
-    dial({ label: 'Rythme', main: finite(pace) ? fmtPace(pace) : '—', unit: '', frac: finite(pace) ? (clamp(pace, -1, 3) + 1) / 4 : 0, cls: 'dial-pace', href: '#age', aria: finite(pace) ? `Rythme de vieillissement : ${num1(pace)} fois` : 'Rythme : pas encore disponible' }));
+    dial({ label: 'Rythme', main: finite(pace) ? fmtPace(pace) : '—', unit: '', frac: finite(pace) ? (clamp(pace, -1, 3) + 1) / 4 : 0, cls: 'dial-pace', href: '#age',
+      soon: paceDate ? dayMonth(paceDate) : null,
+      aria: finite(pace) ? `Rythme de vieillissement : ${num1(pace)} fois` : paceDate ? `Rythme de vieillissement : disponible le ${dayMonth(paceDate)}` : 'Rythme : pas encore disponible' }));
   fill($('v-aujourdhui'),
     topbar({ title: "Aujourd'hui", sub: syncLine(), subId: 'today-sub' }),
     staleBanner(),
@@ -1040,33 +1044,19 @@ function statGrid(items, cls = '') {
 const kvList = items => h('dl', { class: 'kv' }, items.map(([k, v]) => [h('dt', null, k), h('dd', null, v)]));
 const legendItem = (cls, text) => h('span', { class: 'lg' }, h('i', { class: cls }), text);
 function lastNightSection(r) {
-  const sl = r.sleep ?? {};
-  const last = sl.last;
-  const a = sl.avg7;
+  const last = r.sleep?.last;
+  const reg = finite(last?.regularity) ? ` · régularité ${pct(last.regularity)}` : '';
   const card = last
-    ? h('a', { class: 'card night-card', href: '#sommeil', 'aria-label': `Dernière nuit, ${nightLabel(last.key)} : ${hm(last.sleepMin)} de sommeil. Ouvrir le détail du sommeil` },
+    ? h('a', { class: 'card night-card', href: '#sommeil', 'aria-label': `Dernière nuit, ${nightLabel(last.key)} : ${hm(last.sleepMin)}, performance ${pct(last.performance)}${reg}. Ouvrir le détail du sommeil` },
       h('span', { class: 'night-top', 'aria-hidden': 'true' },
         h('span', { class: 'night-icon' }, icon('moon')),
         h('span', { class: 'night-main' }, h('b', { class: 'num night-dur' }, hm(last.sleepMin)),
-          h('span', { class: 'night-span' }, `${clock.time(last.bed)} → ${clock.time(last.wake)} · performance ${pct(last.performance)}`)),
-        icon('next', 'card-chev')),
-      h('span', { 'aria-hidden': 'true' }, statGrid([
-        ['Régularité', finite(last.regularity) ? pct(last.regularity) : '—'],
-        ['Efficacité', finite(last.efficiency) ? pct(last.efficiency) : '—'],
-        ['Réparateur', finite(last.restorative) ? pct(last.restorative) : '—'],
-      ])),
-      last.source === 'span' ? h('span', { class: 'note' }, "Le bracelet n'a transmis que le début et la fin de cette nuit : durée de la session entière, ni efficacité ni réparateur.") : null)
+          h('span', { class: 'night-span' }, `${clock.time(last.bed)} → ${clock.time(last.wake)} · performance ${pct(last.performance)}${reg}`)),
+        icon('next', 'card-chev')))
     : h('div', { class: 'card' }, h('p', { class: 'empty-text' }, 'Aucune nuit valide (il faut au moins 3 h de sommeil).'));
   return h('section', { class: 'section', 'aria-labelledby': 'night-title' },
     secHead('Dernière nuit', 'night-title', false, last ? h('span', { class: 'sec-aside' }, capital(nightLabel(last.key))) : null),
-    card,
-    a ? h('div', { class: 'card avg-card' },
-      h('p', { class: 'card-title' }, 'Moyenne des 7 dernières nuits valides'),
-      statGrid([
-        ['Nuits', int(a.count)], ['Performance', pct(a.performance)], ['Durée', hm(a.sleepMin)],
-        ['Régularité', finite(a.regularity) ? pct(a.regularity) : '—'], ['Efficacité', finite(a.efficiency) ? pct(a.efficiency) : '—'],
-        ['Réparateur', finite(a.restorative) ? pct(a.restorative) : '—'],
-      ])) : null);
+    card);
 }
 function weekSection(r) {
   const days = r.week ?? [];
@@ -1099,7 +1089,7 @@ function weekSection(r) {
   const body = days.map(d => h('tr', { class: d.valid ? '' : 'is-invalid' },
     h('th', { scope: 'row' }, `${capital(weekdayFmt.format(utc(d.key)))} ${dayNum(d.key)}${d.partial ? '*' : d.present && !d.valid ? '°' : ''}`),
     h('td', null, d.present ? int(d.steps) : '—'),
-    h('td', null, finite(d.sleepMin) ? `${hm(d.sleepMin)}${d.sleepSource === 'span' ? '¹' : ''}` : '—'),
+    h('td', null, finite(d.sleepMin) ? hm(d.sleepMin) : '—'),
     h('td', null, d.present ? `${int(d.mod)} / ${int(d.vig)}` : '—'),
     h('td', null, finite(d.rest) ? int(d.rest) : '—')));
   return h('section', { class: 'section', 'aria-labelledby': 'week-title' },
@@ -1109,12 +1099,12 @@ function weekSection(r) {
       h('p', { class: 'card-title' }, 'Jour par jour'),
       h('div', { class: 'scroll-x', tabindex: '0', role: 'region', 'aria-label': 'Tableau des 7 derniers jours' },
         h('table', { class: 'week-table' }, h('thead', null, head), h('tbody', null, body))),
-      note('* jour en cours ; ° jour non valide (moins de 16 h avec une fréquence cardiaque), ignoré par le calcul. Pas et minutes modérées / vigoureuses : jour local. Sommeil : nuit finissant le matin de ce jour ; ¹ session entière (ni stades ni éveils transmis). FC repos : celle du bracelet, sinon la FC nocturne. À comparer avec les écrans de Gadgetbridge.')));
+      note('* jour en cours · ° jour non valide (moins de 16 h de FC), ignoré du calcul. Sommeil et FC de repos : nuit finissant ce jour.')));
 }
 
 // ================= Détail Sommeil =================
 
-const SLEEP_BANDS = { perf: [70, 85], reg: [70, 85], eff: [80, 90], rest: [30, 40] };
+const SLEEP_BANDS = { perf: [70, 85], reg: [70, 85] };
 function bandOf(x, [a, b]) {
   return !finite(x) ? -1 : x < a ? 0 : x < b ? 1 : 2;
 }
@@ -1145,10 +1135,7 @@ function renderSleep() {
   };
   const lines = h('div', { class: 'callout callout-list' },
     h('ul', { class: 'sleep-lines' },
-      line('Durée vs besoin', 'clock', last.performance, SLEEP_BANDS.perf),
-      line('Régularité', 'moon', last.regularity, SLEEP_BANDS.reg, 'il faut 2 nuits valides juste avant'),
-      line('Efficacité', 'bed', last.efficiency, SLEEP_BANDS.eff, 'éveils non transmis'),
-      line('Réparateur', 'wave', last.restorative, SLEEP_BANDS.rest, 'stades non transmis')),
+      line('Régularité', 'clock', last.regularity, SLEEP_BANDS.reg, 'il faut 2 nuits valides juste avant')),
     h('p', { class: 'band-legend', 'aria-hidden': 'true' }, h('i', { class: 'b0' }), 'Faible', h('i', { class: 'b1' }), 'Suffisant', h('i', { class: 'b2' }), 'Optimal'));
   const a = sl.avg7;
   const week = (r.week ?? []).filter(d => !d.partial || finite(d.sleepMin));
@@ -1163,14 +1150,13 @@ function renderSleep() {
     lines,
     h('div', { class: 'card' }, statGrid([
       ['Durée', hm(last.sleepMin)],
-      ['Coucher → lever', `${clock.time(last.bed)} → ${clock.time(last.wake)}`, 'is-wide'],
-    ], 'stats-2'), last.source === 'span' ? note("Le bracelet n'a transmis que le début et la fin de cette nuit (ni stades ni éveils) : la durée est celle de la session entière.") : null),
+      ['Coucher → lever', `${clock.time(last.bed)} → ${clock.time(last.wake)}`],
+    ], 'stats-2')),
     a ? h('section', { class: 'section', 'aria-labelledby': 'avg-title' },
-      secHead('Moyenne des 7 dernières nuits', 'avg-title'),
+      secHead(a.count > 1 ? `Moyenne des ${a.count} dernières nuits` : 'Moyenne', 'avg-title'),
       h('div', { class: 'card' }, statGrid([
-        ['Nuits', int(a.count)], ['Performance', pct(a.performance)], ['Durée', hm(a.sleepMin)],
-        ['Régularité', finite(a.regularity) ? pct(a.regularity) : '—'], ['Efficacité', finite(a.efficiency) ? pct(a.efficiency) : '—'],
-        ['Réparateur', finite(a.restorative) ? pct(a.restorative) : '—'],
+        ['Performance', pct(a.performance)], ['Durée', hm(a.sleepMin)],
+        ['Régularité', finite(a.regularity) ? pct(a.regularity) : '—'],
       ]))) : null,
     week.length ? h('section', { class: 'section', 'aria-labelledby': 'nights-title' },
       secHead('7 dernières nuits', 'nights-title', false, h('span', { class: 'sec-aside' }, 'trait : 8 h')),
@@ -1202,7 +1188,7 @@ function renderIndicator(id) {
   const v = off || finite(ind.value30) ? verdict(ind) : provisionalVerdict(ind);
   const kids = [head];
   if (absent) {
-    kids.push(h('div', { class: 'card ind-hero' }, h('p', { class: 'ind-hero-chip' }, chip('Non mesuré')), h('p', { class: 'ind-text' }, absentText(ind)), h('p', { class: 'ind-text' }, meta.what)));
+    kids.push(h('div', { class: 'card ind-hero' }, h('p', { class: 'ind-hero-chip' }, chip(ind.wait ? 'Bientôt' : 'Non mesuré')), h('p', { class: 'ind-text' }, absentText(ind))));
   } else {
     const [main, unit] = meta.fmt(ind.value6m);
     kids.push(h('div', { class: 'card ind-hero' },
@@ -1216,7 +1202,7 @@ function renderIndicator(id) {
           h('span', { class: 'big' }, h('b', { class: 'num' }, ind.present ? signed1(ind.delta) : '—'), h('small', null, ind.present ? yearWord(ind.delta) : 'non compté')))),
       h('div', { class: 'ind-hero-bar', 'aria-hidden': 'true' }, barViz(ind, ctx, { open: true, cap: capShort })),
       v ? h('h2', { class: 'ind-verdict' }, v.title) : null,
-      h('p', { class: 'ind-text' }, v ? v.text : ind.reason ?? ''),
+      h('p', { class: 'ind-text' }, v ? v.text : ind.reason ? `${capital(ind.reason)}.` : ''),
       finite(target) ? h('p', { class: 'ind-target' }, `Neutre pour ton profil : ${valText(id, target)}${ind.present && finite(ind.delta30) ? ` · impact sur 30 jours : ${signed1(ind.delta30)} ${yearWord(ind.delta30)}` : ''}.`) : null));
   }
   // Tendance hebdomadaire (un point par dimanche) : valeur moyenne sur 6 mois de l'indicateur.
@@ -1247,7 +1233,6 @@ function renderIndicator(id) {
   kids.push(h('section', { class: 'section', 'aria-labelledby': 'ind-how' }, secHead('Mesure', 'ind-how'),
     h('div', { class: 'card prose-card' },
       h('p', null, meta.what),
-      ind.reason && (absent || estimated) ? h('p', null, capital(ind.reason)) : null,
       h('p', { class: 'muted' }, `Source : ${meta.src}. Barèmes et méthode : `, h('a', { href: '#methode' }, 'Méthode'), '.'))));
   fill(view, kids);
 }
@@ -1352,7 +1337,6 @@ function renderPlus() {
           ['Période', period],
           ['Jours valides', int(r.validDays ?? 0)],
           ['Nuits valides', int(r.validNights ?? 0)],
-          ['Lecture', `${nfx.format(state.readSecs)} s`],
         ]),
         staleBanner(),
         h('button', { class: 'btn btn-secondary', type: 'button', 'data-action': 'pick' }, icon('upload'), 'Charger un autre export'))),
@@ -1362,15 +1346,14 @@ function renderPlus() {
           h('span', { class: 'list-main' }, h('span', { class: 'list-label' }, profile.title), h('span', { class: 'list-sub' }, 'Privé · affiché sur ce téléphone seulement')),
           icon('down', 'list-chev')),
         h('div', { class: 'profile-body' },
-          note("Ce bloc n'est pas copié avec le diagnostic. Ne le transmets pas, même en capture d'écran."),
           profile.alert ? h('p', { class: 'alert' }, profile.alert) : null,
           h('dl', { class: 'kv' }, profile.items.map(([k, v]) => [h('dt', null, k), h('dd', null, v)])),
-          note('À comparer avec Gadgetbridge → Paramètres → À propos de vous. Une correction n\'apparaît ici qu\'après une synchro puis un nouvel export.')))),
+          note('Jamais copié avec le diagnostic. Se corrige dans Gadgetbridge → Paramètres → À propos de vous, puis nouvel export.')))),
     h('section', { class: 'section', 'aria-labelledby': 'p-learn' }, secHead('Comprendre', 'p-learn'),
       h('div', { class: 'card list' },
         row('#methode', 'doc', 'Méthode et barèmes', 'Calcul, cadence, sources'),
         h('button', { class: 'list-row', type: 'button', 'data-sheet': 'age' }, h('span', { class: 'list-icon' }, icon('orb')),
-          h('span', { class: 'list-main' }, h('span', { class: 'list-label' }, "L'âge bio"), h('span', { class: 'list-sub' }, 'Valeur provisoire, fiabilité, calibrage')), icon('next', 'list-chev')),
+          h('span', { class: 'list-main' }, h('span', { class: 'list-label' }, "L'âge bio"), h('span', { class: 'list-sub' }, 'Provisoire, officiel, calibrage')), icon('next', 'list-chev')),
         h('button', { class: 'list-row', type: 'button', 'data-sheet': 'rythme' }, h('span', { class: 'list-icon' }, icon('trend')),
           h('span', { class: 'list-main' }, h('span', { class: 'list-label' }, 'Le rythme de vieillissement'), h('span', { class: 'list-sub' }, 'De −1,0x à 3,0x')), icon('next', 'list-chev')))),
     h('section', { class: 'section', 'aria-labelledby': 'p-help' }, secHead('Aide', 'p-help'),
@@ -1380,8 +1363,7 @@ function renderPlus() {
           h('span', { class: 'list-main' }, h('span', { class: 'list-label' }, 'Démonstration'),
             h('span', { class: 'list-sub demo-links' }, h('a', { href: '?demo' }, 'complète'), ' · ', h('a', { href: '?demo=nouveau' }, 'nouveau'), ' · ', h('a', { href: '?demo=pause' }, 'en pause')))))),
     h('footer', { class: 'app-foot' },
-      h('p', null, `Âge bio ${APP_VERSION} · Le fichier est lu sur cet appareil : rien n'est envoyé ni conservé.`),
-      h('p', null, 'Estimation personnelle fondée sur la littérature scientifique. Pas un avis médical.')));
+      h('p', null, `Âge bio ${APP_VERSION} · lu sur cet appareil, rien n'est envoyé ni conservé.`)));
 }
 function renderMethod() {
   const age = finite(state.data?.result?.civil) ? state.data.result.civil : 40;
@@ -1392,9 +1374,9 @@ function renderMethod() {
     : 'Barèmes pour un profil de référence de 40 ans : interpolation linéaire entre les points, valeur constante au-delà.';
   $('method-scales').replaceChildren(...IDS.map(id => {
     const meta = IND[id];
-    const sc = id === 'M9' ? null : scaleOf(id, ctx);
+    const sc = scaleOf(id, ctx);
     const t = targetOf(id, ctx);
-    const text = sc ? sc.map(([x, y]) => `${meta.x(x)} → ${signed1(y)}`).join(' ; ') : 'non mesurée : sans effet (impact 0)';
+    const text = sc ? sc.map(([x, y]) => `${meta.x(x)} → ${signed1(y)}`).join(' ; ') : 'barème indisponible sans date de naissance';
     return h('li', null, h('strong', null, `${id} ${meta.name}`), ` : ${text}.`, finite(t) ? ` Neutre : ${valText(id, t)}.` : '', ' ', h('span', { class: 'muted' }, meta.src));
   }));
   const version = calc.CONFIG?.METHOD_VERSION ?? calc.CONFIG?.VERSION ?? null;
@@ -1426,7 +1408,7 @@ const SHEETS = {
     const r = state.data?.result;
     const off = r?.official;
     const p = off ? null : r?.provisional;
-    const kids = [h('p', null, "Ton âge bio estime l'âge de ton corps d'après 9 indicateurs mesurés par ton bracelet sur 6 mois : sommeil, activité, forme. Chaque indicateur ajoute ou retire des années à ton âge civil.")];
+    const kids = [h('p', null, "Ton âge bio estime l'âge de ton corps d'après 8 indicateurs de sommeil, d'activité et de forme mesurés par ton bracelet. Chacun ajoute ou retire des années à ton âge civil.")];
     if (off) {
       kids.push(kvList([
         ['Âge bio', `${fmtAge(off.bio)} ans`], ['Âge civil', `${nf1.format(round1(off.civil))} ans`], ['Écart', `${signed1(off.gap)} ${yearWord(off.gap)}`],
@@ -1440,20 +1422,10 @@ const SHEETS = {
         ['Fiabilité', relText(p.reliability?.score)], ['Calculé le', longDay(p.key)],
       ]));
     }
-    kids.push(h('h3', null, 'Dès la première nuit'),
-      h('p', null, "Avant la première valeur officielle, ton âge bio s'affiche en valeur provisoire, dès ta première nuit ou journée valide : mêmes barèmes, sur les données disponibles. Le sommeil, sa régularité, les pas et la FC de repos comptent dès la première mesure ; l'activité et le renforcement, comptés par semaine, après 7 jours valides."),
-      h('h3', null, 'Fiabilité'),
-      h('p', null, 'Elle dit combien de données portent ton âge bio : environ 28 % après une semaine, 48 % à 21 nuits, 100 % à 90 jours. Plus elle est basse, plus la valeur peut bouger.'),
-      sheetCta('Comprendre la fiabilité', 'fiabilite'),
-      h('h3', null, 'Chaque dimanche'),
-      h('p', null, 'La valeur officielle se met à jour chaque dimanche, après la nuit du samedi. Elle prend le relais de la valeur provisoire avec 21 nuits valides sur les 31 derniers jours ; ensuite, sous ce seuil, les mises à jour se mettent en pause et la dernière valeur reste affichée.'),
-      h('h3', null, 'Calibrage'),
-      h('p', null, 'Pendant les 90 premiers jours valides, la valeur bouge davantage : elle apprend ton point de départ.'),
-      h('h3', null, 'Précision'),
-      h('p', null, 'L\'intervalle à 95 % vient de la variabilité de tes propres mesures : plus de nuits et de jours le resserrent.'),
-      h('h3', null, 'Aperçu du jour'),
-      h('p', null, 'Le même calcul avec tes données jusqu\'à aujourd\'hui. Il annonce la valeur de dimanche sans la remplacer.'),
-      h('p', { class: 'notice' }, 'Estimation personnelle fondée sur la littérature scientifique. Pas un avis médical.'),
+    kids.push(h('h3', null, 'Provisoire'),
+      h('p', null, "Avant la valeur officielle, ton âge bio est calculé chaque jour sur tes données disponibles ; la fiabilité dit à quel point il peut encore bouger."),
+      h('h3', null, 'Officiel, chaque dimanche'),
+      h('p', null, 'Dès 21 nuits valides sur les 31 derniers jours ; en dessous, il se met en pause. Pendant les 90 premiers jours valides (calibrage), il bouge davantage. L\'aperçu du jour annonce la valeur de dimanche.'),
       linkCta('Méthode complète', '#methode'));
     return { title: "L'âge bio", kids };
   },
@@ -1481,23 +1453,23 @@ const SHEETS = {
       pending.length ? h('p', { class: 'note' }, `Pas encore mesurés : ${pending.join(', ')}.`) : null);
     }
     kids.push(
-      h('p', null, "La fiabilité dit combien de données portent ton âge bio. Pour chacun des 6 indicateurs que le bracelet mesure en continu (durée et régularité du sommeil, activité modérée et vigoureuse, pas, FC de repos), la précision d'une moyenne croît comme la racine du nombre de mesures, et un indicateur pas encore mesuré compte pour zéro. Elle atteint 100 % avec 90 mesures par indicateur : la fin du calibrage."),
+      h('p', null, "Quantité de données derrière ton âge bio : plus elle est basse, plus la valeur peut bouger."),
       h('ul', { class: 'scale-list' },
         row('≈ 4 %', 'première nuit'),
         row('≈ 28 %', 'une semaine'),
-        row('≈ 48 %', '21 nuits : la valeur officielle prend le relais'),
-        row('≈ 71 %', '45 jours'),
+        row('≈ 48 %', '21 nuits : valeur officielle'),
         row('100 %', '90 jours')),
-      h('p', null, "Le renforcement et la VO2 max comptent dans ton âge bio quand ils sont mesurés, pas dans la fiabilité : ils dépendent de séances enregistrées. La fiabilité ne juge pas les barèmes eux-mêmes : l'âge bio reste une estimation, pas un avis médical."),
       linkCta('Méthode complète', '#methode'));
     return { title: 'Fiabilité', kids };
   },
   rythme: () => {
     const off = state.data?.result?.official;
+    const soon = (state.data?.result?.upcoming ?? []).find(u => u.id === 'pace');
     const row = (v, t) => h('li', null, h('b', { class: 'num' }, v), h('span', null, t));
     return {
       title: 'Rythme de vieillissement',
       kids: [
+        soon ? h('p', { class: 'notice' }, `Disponible le ${dayMonth(soon.date)} : il faut plus de 30 jours de données pour comparer tes 30 derniers jours au reste.`) : null,
         h('p', null, 'Le rythme compare tes 30 derniers jours à tes 6 derniers mois. Il dit à quelle vitesse ton âge bio avancerait si tes habitudes récentes duraient six mois.'),
         h('ul', { class: 'scale-list' },
           row(`${MINUS}1,0x`, 'ou moins : ton âge bio baisse nettement'),
@@ -1509,21 +1481,18 @@ const SHEETS = {
         off && finite(off.pace?.g30) && finite(off.pace?.g182)
           ? statGrid([['Écart 30 j', `${signed1(off.pace.g30)} an`], ['Écart 182 j', `${signed1(off.pace.g182)} an`], ['Rythme', fmtPace(off.pace.value)]])
           : null,
-        h('p', null, 'Sur la jauge, la traînée part de la valeur du dimanche précédent.'),
-        linkCta('Voir la tendance', '#tendance'),
+        state.data?.result?.curve?.length ? linkCta('Voir la tendance', '#tendance') : null,
       ],
     };
   },
   sommeil: () => ({
     title: 'Scores de sommeil',
     kids: [
-      h('p', null, 'Performance = sommeil ÷ besoin de 8 h. Régularité : écart de tes heures de coucher et de lever avec les nuits précédentes. Efficacité = sommeil ÷ temps entre coucher et lever. Réparateur = (profond + paradoxal) ÷ sommeil.'),
+      h('p', null, 'Performance = durée de la nuit ÷ besoin de 8 h. Régularité : écart de tes heures de coucher et de lever avec les 4 nuits précédentes.'),
       h('ul', { class: 'scale-list' },
         h('li', null, h('b', null, 'Performance'), h('span', null, 'faible < 70 % · optimale ≥ 85 %')),
-        h('li', null, h('b', null, 'Régularité'), h('span', null, 'faible < 70 % · optimale ≥ 85 %')),
-        h('li', null, h('b', null, 'Efficacité'), h('span', null, 'faible < 80 % · optimale ≥ 90 %')),
-        h('li', null, h('b', null, 'Réparateur'), h('span', null, 'faible < 30 % · optimal ≥ 40 %'))),
-      h('p', null, 'Une nuit compte si elle dure au moins 3 h. Quand le bracelet ne transmet ni stades ni éveils, seule la durée est connue.'),
+        h('li', null, h('b', null, 'Régularité'), h('span', null, 'faible < 70 % · optimale ≥ 85 %'))),
+      h('p', null, 'Durée : du coucher au lever, éveils compris (le bracelet ne transmet pas le détail). Une nuit compte à partir de 3 h.'),
       linkCta('Méthode complète', '#methode'),
     ],
   }),
@@ -1534,13 +1503,13 @@ for (const id of IDS) {
     const off = state.data?.result?.official ?? state.data?.result?.provisional;
     const ind = off?.indicators?.find(x => x.id === id);
     const ctx = ctxAt(finite(off?.civil) ? off.civil : 40);
-    const sc = id === 'M9' ? null : scaleOf(id, ctx);
+    const sc = scaleOf(id, ctx);
     const t = targetOf(id, ctx);
     return {
       title: meta.name,
       kids: [
         h('p', null, meta.what),
-        ind?.reason && !ind.present ? h('p', { class: 'notice' }, capital(ind.reason)) : null,
+        ind?.reason && !ind.present ? h('p', { class: 'notice' }, ind.estimated ? `${capital(ind.reason)}.` : absentText(ind)) : null,
         finite(t) ? h('p', null, `Neutre pour ton profil (impact nul) : ${valText(id, t)}.`) : null,
         sc ? [h('h3', null, 'Barème'), h('ul', { class: 'scale-list' }, sc.map(([x, y]) => h('li', null, h('b', { class: 'num' }, meta.x(x)), h('span', { class: impactCls(y) }, `${signed1(y)} ${yearWord(y)}`))))] : null,
         h('p', { class: 'muted' }, `Source : ${meta.src}.`),
@@ -1785,7 +1754,6 @@ async function loadExport(file, { demo = null } = {}) {
   if (state.busy) return;
   state.busy = true;
   state.error = null;
-  const t0 = performance.now();
   const target = pendingHash || (route && TABS.includes(route.screen) ? `#${route.screen}` : '#age');
   pendingHash = '';
   closeSheet();
@@ -1827,7 +1795,6 @@ async function loadExport(file, { demo = null } = {}) {
     await wait(minStep);
     state.data = data;
     state.loadedAt = Date.now();
-    state.readSecs = (performance.now() - t0) / 1000;
     state.week = null;
     state.open = new Set();
     const off = r.official;
