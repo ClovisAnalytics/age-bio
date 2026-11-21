@@ -1053,7 +1053,7 @@ function bloodRow(x, m, latest) {
       h('span', { class: 'ind-top' }, h('span', { class: 'ind-name' }, meta.name),
         x.present ? null : chip('Non comptée'),
         x.date !== latest ? h('span', { class: 'blood-date' }, dayMonthYear(x.date)) : null),
-      h('span', { class: 'ind-body' }, barViz(ind, ctxAt(m.civil)), impactEl(ind)),
+      h('span', { class: 'ind-body' }, barViz(ind, ctxAt(finite(x.age) ? x.age : m.civil)), impactEl(ind)),
       x.present ? null : h('span', { class: 'ind-reason blood-reason' }, `${capital(x.reason)}.`)));
 }
 // Âge par organe : âge civil + impact des marqueurs de l'organe (classement de Levine 2018). Grossier.
@@ -1844,7 +1844,7 @@ function renderMethod() {
     const sc = scaleOf(id, ctx);
     const text = sc ? sc.map(([x, y]) => `${refText(id, x)} → ${signed1(y)}`).join(' ; ') : '';
     const per = c.log ? 'par unité de ln(CRP)' : `par ${calc.refUnit(id)}`;
-    return h('li', null, h('strong', null, `${w.rank}. ${IND[id].name}`), ` (poids ${w.pct}${NBSP}%, cumul ${w.cum}${NBSP}% ; ${calc.CONFIG.BLOOD_SYSTEMS[c.system].toLowerCase()}) : ${text}. Neutre : ${refText(id, c.neutral)} ; coefficient ${coefFmt.format(c.coef).replace('-', MINUS)} ${per}. Unités : ${unitsText(id)}.`);
+    return h('li', null, h('strong', null, `${w.rank}. ${IND[id].name}`), ` (poids ${w.pct}${NBSP}%, cumul ${w.cum}${NBSP}% ; ${calc.CONFIG.BLOOD_SYSTEMS[c.system].toLowerCase()}) : ${text}. Neutre pour ce profil : ${refText(id, calc.bloodNeutral(id, ctx))} ; coefficient ${coefFmt.format(c.coef).replace('-', MINUS)} ${per}. Unités : ${unitsText(id)}.`);
   }));
   const version = calc.CONFIG?.METHOD_VERSION ?? calc.CONFIG?.VERSION ?? null;
   $('method-version').textContent = `Âge bio ${APP_VERSION}${version ? ` · méthode ${version}` : ''} · constantes et sources dans CONFIG (calc.js).`;

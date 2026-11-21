@@ -2,7 +2,7 @@
 
 Âge biologique, rythme de vieillissement et sommeil, calculés **dans le navigateur du téléphone** à partir d'un bracelet Xiaomi Smart Band 7 Pro synchronisé avec [Gadgetbridge](https://gadgetbridge.org), et des prises de sang saisies dans l'app. Sans compte, sans serveur, sans abonnement.
 
-Inspiration : WHOOP Age et Pace of Aging. Formule propre au projet, fondée sur des méta-analyses de mortalité toutes causes ; prise de sang : les 9 analyses et coefficients de PhenoAge (Levine 2018). Section *Méthode* de l'app, constantes et sources dans `CONFIG` (`calc.js`).
+Inspiration : WHOOP Age et Pace of Aging. Formule propre au projet, fondée sur des méta-analyses de mortalité toutes causes ; prise de sang : les 9 analyses et coefficients de PhenoAge (Levine 2018), comparées à la médiane des adultes du même âge et du même sexe (NHANES 1999-2010). Section *Méthode* de l'app, constantes et sources dans `CONFIG` (`calc.js`).
 
 > Estimation personnelle fondée sur la littérature scientifique. Pas un avis médical.
 

@@ -10,7 +10,7 @@
 const G = 10;   // années par unité de ln(HR) : t = 10 × ln(HR), « roughly 10% increase in risk » par année (C, WP p. 12)
 
 export const CONFIG = {
-  METHOD_VERSION: '2.3',
+  METHOD_VERSION: '2.5',
 
   // ---------- Lecture ----------
   HR_VALID: [30, 220],          // FC valide si 30 ≤ HEART_RATE ≤ 220 (0, 255 et négatifs = pas de mesure)
@@ -168,7 +168,7 @@ export const CONFIG = {
   JURCA_MODEST: { strength: 20, steps: 7000 },
   MET_ML: 3.5,                  // 1 MET = 3,5 ml/kg/min
 
-  // ---------- Prise de sang (méthode 2.3) ----------
+  // ---------- Prise de sang (méthode 2.4) ----------
   // Saisie dans l'app, gardée sur le téléphone (app.js) ; ici, calcul et unités seulement.
   // Coefficients PhenoAge (coef) : Levine ME et al., An epigenetic biomarker of aging for lifespan and healthspan, Aging
   // (Albany NY) 2018;10(4):573-591, tableau 1 (C) : ln HR de mortalité toutes causes par unité, modèle de Gompertz à
@@ -177,9 +177,37 @@ export const CONFIG = {
   // recompte pas ce qu'un autre compte déjà (C) ; le recouvrement avec les indicateurs du bracelet n'est pas corrigé (D).
   // Impact = G × coef × (valeur − neutre), même conversion que les autres indicateurs ; CRP : G × coef × ln(CRP /
   // neutre). PhenoAge convertit avec 1 / 0,09165 ≈ 10,9 ans par unité de ln HR (D : on garde G = 10).
-  // Neutre = moyenne de la population de validation (C : NHANES IV 1999-2010, 11 432 adultes, tableau S1 de Liu 2018 ;
-  // unités du tableau erronées pour l'albumine et la CRP). CRP : moyenne géométrique déduite de 0,4 ± 1,0 mg/dL en loi
-  // log-normale, ≈ 1,5 mg/L (D).
+  // Neutre (neutral) = médiane des adultes du même sexe et du même âge, dans la population de validation de PhenoAge
+  // (D : calculée sur les fichiers publics NHANES 1999-2010 du CDC, 31 170 adultes de 20 ans et plus hors grossesse,
+  // poids d'enquête de l'examen, ceux du sous-échantillon à jeun pour la glycémie à jeun ; tranches 20-29 … 70-79 et
+  // 80 ans et plus placées à 25, 35 … 85 ans : BLOOD_NEUTRAL_AGES). Contrôle : moyennes tous âges = neutres de la
+  // méthode 2.3 (IDR 12,70 / 12,7 ; VGM 89,9 / 90 ; albumine 43,0 / 42,7 ; lymphocytes 30,0 / 30). Âge retenu : celui
+  // du jour de la prise de sang ; « autre » ou inconnu : moyenne H/F ; sans âge : BLOOD_NEUTRAL_DEFAULT_AGE.
+  // Pourquoi l'âge (D, NHANES) : IDR, glycémie, CRP, créatinine et VGM montent avec l'âge, albumine et lymphocytes
+  // baissent ; Σ coef × pente = 0,019 ln HR par an chez l'homme, 0,013 chez la femme (Levine 2018 : 0,0916 − 0,0804 =
+  // 0,011, écart entre l'âge seul et l'âge du modèle complet). Un neutre tous âges (moyenne, 46,5 ans) comptait ce
+  // vieillissement en plus de l'âge civil : sur les 13 323 adultes NHANES ayant les 9 analyses, impact médian −2,5 ans
+  // chez l'homme de 20-29 ans et +4,9 ans à 70-79 ans (femme : −3,4 et +2,5) ; avec ce neutre, −0,2 à +0,7 an
+  // jusqu'à 79 ans, +0,9 à +1,1 au-delà (bloodImpact de la méthode 2.4 appliqué à ces 13 323 adultes).
+  // Pourquoi le sexe : créatinine (masse musculaire) 84 µmol/L chez l'homme de 25 ans, 64 chez la femme, ≈ 1,9 an
+  // d'écart à santé égale ; phosphatases alcalines, albumine et glycémie diffèrent aussi.
+  // Pourquoi la médiane : la moyenne, tirée par les malades (diabète, insuffisance rénale), donnait 0,6 à 2,8 ans de
+  // bonus au bilan typique ; avec la médiane, un bilan typique pour son âge et son sexe vaut ≈ 0 (D).
+  // CRP : médiane des valeurs ≤ 10 mg/L (règle de la saisie). Créatinine recalibrée sur la méthode de référence IDMS
+  // (celle des laboratoires, enzymatique) comme le demande le CDC : 1999-2000, 1,013 × valeur + 0,147 mg/dL ; 2005-2006,
+  // 0,978 × valeur − 0,016 ; autres cycles sans correction (C : documentation NHANES LAB18, L40_B, L40_C, BIOPRO_D,
+  // BIOPRO_E). Glycémie : plasma à jeun (LBXGLU), comme la glycémie à jeun saisie.
+  BLOOD_NEUTRAL_AGES: [25, 35, 45, 55, 65, 75, 85],
+  BLOOD_NEUTRAL_DEFAULT_AGE: 45,
+  // Recouvrement avec le bracelet (méthode 2.5) : chaque impact × 0,79, la part de la prise de sang que l'activité et la
+  // FC de repos ne disent pas déjà (D : NHANES 2003-2006, 5 639 adultes avec prise de sang, pouls de repos et ≥ 4 jours
+  // d'accéléromètre de ≥ 10 h, 1 424 décès, suivi médian 14,4 ans, fichiers publics de mortalité du CDC 2019 ; Cox
+  // pondéré, âge et sexe). ln HR par an d'impact (méthode 2.4) : 0,107 seul (l'échelle G = 10 suppose 0,100), 0,084 avec
+  // les quintiles de minutes ≥ 2 020 coups/min, de coups par jour porté et de pouls de repos ; 0,084 ÷ 0,107 = 0,79
+  // (bootstrap IC 95 % 0,73-0,85 ; sans les 2 premières années 0,79 ; non pondéré 0,79 ; < 65 ans 0,85 ; ≥ 65 ans 0,72).
+  // Ni sommeil ni VO2 max dans ces données, pouls pris assis : correction plutôt prudente. Glycémie du bilan sérique (pas
+  // toujours à jeun, échantillon complet) ; non-port = ≥ 60 min à 0 coup (Troiano 2008).
+  BLOOD_OVERLAP: 0.79,
   // best : limite usuelle de l'adulte côté favorable, au-delà plus de bonus (D : une valeur anormalement basse n'est
   // pas un gain) ; créatinine par sexe (D : H 59, F 45, autre 52 µmol/L, méthode enzymatique).
   // sd : écart-type de la population de validation (C : tableau S1 de Liu 2018) ; CRP : écart-type de ln(CRP) déduit
@@ -203,39 +231,57 @@ export const CONFIG = {
   // units : unités d'un compte rendu, la première est celle du modèle ; k : valeur dans l'unité du modèle = valeur × k
   // (C, masses molaires : glucose 180,16 g/mol, créatinine 113,12 g/mol) ; abs : lymphocytes en nombre, valeur × abs =
   // G/L, ramenés en % des leucocytes du même compte rendu ; dp : décimales affichées au plus ; ex : valeur habituelle
-  // donnée en exemple (D : neutre arrondi ; lymphocytes en nombre : environ 30 % de 6,8 G/L).
+  // donnée en exemple (D : moyenne de l'adulte arrondie ; lymphocytes en nombre : environ 30 % de 6,8 G/L).
   BLOOD: [
     { id: 'idr', label: 'IDR', aka: 'Indice de distribution des globules rouges, RDW, IDR-CV · dans la NFS',
       tip: "l'IDR-CV en %, pas l'IDR-SD en fL", range: [8, 35],
       units: [{ u: '%', k: 1, dp: 1, ex: 12.7 }],
-      counted: { coef: 0.3306, neutral: 12.7, sd: 1.1, best: 11.5, system: 'immunite' } },
+      counted: { coef: 0.3306,
+        neutral: { male: [12.23, 12.31, 12.39, 12.50, 12.64, 12.89, 13.11], female: [12.29, 12.39, 12.51, 12.51, 12.61, 12.83, 13.01] },
+        sd: 1.1, best: 11.5, system: 'immunite' } },
     { id: 'glycemie', label: 'Glycémie à jeun', aka: 'Glucose, glycémie', range: [1.5, 40], typical: [3, 15],
       units: [{ u: 'mmol/L', k: 1, dp: 2, ex: 5.4 }, { u: 'g/L', k: 1 / 0.18016, dp: 2, ex: 0.97 }, { u: 'mg/dL', k: 1 / 18.016, dp: 0, ex: 97 }],
-      counted: { coef: 0.1953, neutral: 5.4, sd: 1.5, best: 3.9, system: 'metabolisme' } },
+      counted: { coef: 0.1953,
+        neutral: { male: [5.27, 5.38, 5.55, 5.72, 5.89, 5.94, 5.83], female: [4.97, 5.11, 5.24, 5.44, 5.55, 5.76, 5.61] },
+        sd: 1.5, best: 3.9, system: 'metabolisme' } },
     { id: 'creatinine', label: 'Créatinine', aka: 'Créatininémie', tip: 'dans le sang, pas dans les urines', range: [15, 2000], typical: [35, 200],
       units: [{ u: 'µmol/L', k: 1, dp: 0, ex: 75 }, { u: 'mg/L', k: 8.84, dp: 1, ex: 8.5 }, { u: 'mg/dL', k: 88.4, dp: 2, ex: 0.85 }],
-      counted: { coef: 0.0095, neutral: 75.2, sd: 21.9, best: { male: 59, female: 45, other: 52 }, system: 'reins' } },
+      counted: { coef: 0.0095,
+        neutral: { male: [84, 85, 85, 86, 88, 93, 102], female: [64, 64, 67, 68, 70, 75, 82] },
+        sd: 21.9, best: { male: 59, female: 45, other: 52 }, system: 'reins' } },
     { id: 'vgm', label: 'VGM', aka: 'Volume globulaire moyen, MCV · dans la NFS', tip: '1 fL = 1 µm³ = 1 µ³', range: [50, 150],
       units: [{ u: 'fL', k: 1, dp: 1, ex: 90 }],
-      counted: { coef: 0.0268, neutral: 90.0, sd: 6.0, best: 80, system: 'immunite' } },
+      counted: { coef: 0.0268,
+        neutral: { male: [89.3, 89.6, 90.2, 90.8, 91.6, 92.3, 93.2], female: [88.9, 89.5, 90.1, 90.2, 90.8, 91.1, 91.9] },
+        sd: 6.0, best: 80, system: 'immunite' } },
     { id: 'albumine', label: 'Albumine', aka: 'Albuminémie, albumine sérique', tip: 'dans le sang, pas dans les urines', range: [10, 70], typical: [25, 60],
       units: [{ u: 'g/L', k: 1, dp: 1, ex: 43 }, { u: 'g/dL', k: 10, dp: 2, ex: 4.3 }],
-      counted: { coef: -0.0336, neutral: 42.7, sd: 4.2, best: 50, system: 'foie' } },
+      counted: { coef: -0.0336,
+        neutral: { male: [45.7, 44.9, 43.8, 43.5, 42.8, 42.4, 41.7], female: [42.6, 42.5, 42.1, 42.2, 42.1, 41.6, 41.0] },
+        sd: 4.2, best: 50, system: 'foie' } },
     { id: 'crp', label: 'CRP', aka: 'Protéine C réactive, CRP ultrasensible, CRPus, hs-CRP', tip: 'une valeur « < 1 » se saisit telle quelle',
       range: [0, 500], text: true,
       units: [{ u: 'mg/L', k: 1, dp: 2, ex: 1.5 }, { u: 'mg/dL', k: 10, dp: 3, ex: 0.15 }],
-      counted: { coef: 0.0954, neutral: 1.5, sd: 1.41, best: 0.3, log: true, max: 10, system: 'inflammation' } },
+      counted: { coef: 0.0954,
+        neutral: { male: [0.87, 1.25, 1.45, 1.61, 1.78, 1.79, 1.98], female: [1.40, 1.65, 1.80, 2.05, 2.29, 2.25, 1.94] },
+        sd: 1.41, best: 0.3, log: true, max: 10, system: 'inflammation' } },
     { id: 'leucocytes', label: 'Leucocytes', aka: 'Globules blancs, GB · dans la NFS', tip: '10⁹/L, 10³/mm³ et 10³/µL = G/L ; /µL = /mm³',
       range: [0.5, 100], typical: [2, 25],
       units: [{ u: 'G/L', k: 1, dp: 2, ex: 6.8 }, { u: '/mm³', k: 0.001, dp: 0, ex: 6800 }],
-      counted: { coef: 0.0554, neutral: 6.8, sd: 2.4, best: 4, system: 'immunite' } },
+      counted: { coef: 0.0554,
+        neutral: { male: [7.00, 6.94, 6.89, 6.80, 6.87, 6.92, 6.93], female: [7.32, 7.30, 7.12, 6.69, 6.76, 6.85, 6.87] },
+        sd: 2.4, best: 4, system: 'immunite' } },
     { id: 'lymphocytes', label: 'Lymphocytes', aka: 'Formule leucocytaire · dans la NFS',
       tip: "en nombre, l'app calcule le % avec les leucocytes", range: [1, 99], typical: [5, 70],
       units: [{ u: '%', k: 1, dp: 1, ex: 30 }, { u: 'G/L', abs: 1, dp: 2, ex: 2 }, { u: '/mm³', abs: 0.001, dp: 0, ex: 2000 }],
-      counted: { coef: -0.0120, neutral: 30.0, sd: 9.6, best: 40, system: 'immunite' } },
+      counted: { coef: -0.0120,
+        neutral: { male: [30.5, 30.4, 29.8, 29.0, 26.9, 25.4, 23.6], female: [30.7, 30.0, 29.5, 31.0, 30.9, 28.5, 26.2] },
+        sd: 9.6, best: 40, system: 'immunite' } },
     { id: 'pal', label: 'Phosphatases alcalines', aka: 'PAL, ALP', tip: 'UI/L = U/L', range: [5, 5000],
       units: [{ u: 'UI/L', k: 1, dp: 0, ex: 69 }],
-      counted: { coef: 0.00188, neutral: 69.4, sd: 28.0, best: 40, system: 'foie' } },
+      counted: { coef: 0.00188,
+        neutral: { male: [70, 67, 66, 67, 68, 67, 72], female: [59, 59, 62, 71, 72, 71, 69] },
+        sd: 28.0, best: 40, system: 'foie' } },
   ],
   // Analyses suivies sans compter jusqu'à Âge bio 2.3.1, retirées depuis : les valeurs déjà saisies restent telles
   // quelles dans la mémoire de l'app et la sauvegarde, sans s'afficher. id : valeurs plausibles, dans l'unité d'alors.
@@ -678,8 +724,8 @@ export function scaleFor(id, ctx = {}) {
       return CONFIG.M8_SCALE.map(([x, y]) => [n + x, y]);
     }
     default: {
-      const c = BLOOD_BY_ID.get(id)?.counted;
-      return c ? bloodScale(c, ctx.gender ?? null) : null;
+      const b = BLOOD_BY_ID.get(id);
+      return b?.counted ? bloodScale(b, { age, gender: ctx.gender ?? null }) : null;
     }
   }
 }
@@ -736,7 +782,7 @@ export const refUnit = id => BLOOD_BY_ID.get(id)?.units[0].u ?? '';
 // Influence d'une analyse comptée (années) : impact d'un écart-type de la population, borné à 3 ans. Classement seulement.
 export function bloodInfluence(id) {
   const c = BLOOD_BY_ID.get(id)?.counted;
-  return c ? Math.min(G * Math.abs(c.coef) * c.sd, CONFIG.BLOOD_BOUNDS[1]) : 0;
+  return c ? CONFIG.BLOOD_OVERLAP * Math.min(G * Math.abs(c.coef) * c.sd, CONFIG.BLOOD_BOUNDS[1]) : 0;
 }
 
 // Poids de chaque analyse : influence² ÷ somme des influences², part des écarts d'âge bio entre personnes dus à la
@@ -845,16 +891,31 @@ export function cleanBilans(list) {
 
 const bestOf = (c, gender) => (typeof c.best === 'number' ? c.best : gender === 1 ? c.best.male : gender === 0 ? c.best.female : c.best.other);
 
-// Impact (années) d'une valeur exacte : pas de bonus au-delà de `best`, borné à ± 3 ans.
-function bloodRaw(c, x, gender) {
-  const best = bestOf(c, gender);
-  const xb = c.coef > 0 ? Math.max(x, best) : Math.min(x, best);
-  return clamp(G * c.coef * (c.log ? Math.log(xb / c.neutral) : xb - c.neutral), ...CONFIG.BLOOD_BOUNDS);
+// Neutre d'un marqueur pour ctx = { age, gender } : médiane NHANES du sexe, interpolée sur l'âge (constante avant 25 ans
+// et après 85) ; « autre » ou inconnu : moyenne H/F ; sans âge : BLOOD_NEUTRAL_DEFAULT_AGE.
+function neutralOf(c, ctx = {}) {
+  const age = Number.isFinite(ctx.age) ? ctx.age : CONFIG.BLOOD_NEUTRAL_DEFAULT_AGE;
+  const at = sex => interp(CONFIG.BLOOD_NEUTRAL_AGES.map((a, i) => [a, c.neutral[sex][i]]), age);
+  return ctx.gender === 1 ? at('male') : ctx.gender === 0 ? at('female') : (at('male') + at('female')) / 2;
+}
+// Neutre de l'analyse id pour ce profil (unité du modèle), null si elle ne compte pas.
+export function bloodNeutral(id, ctx = {}) {
+  const c = BLOOD_BY_ID.get(id)?.counted;
+  return c ? neutralOf(c, ctx) : null;
 }
 
-// Impact d'une valeur saisie : { delta, counted, reason }. « < s » : la vraie valeur est plus basse, « > s » plus
-// haute ; si ce côté contient le neutre, impact 0, sinon celui du seuil (borne prudente).
-export function bloodImpact(id, raw, gender = null) {
+// Impact (années) d'une valeur exacte : pas de bonus au-delà de `best`, borné à ± 3 ans, × BLOOD_OVERLAP.
+function bloodRaw(c, x, ctx) {
+  const best = bestOf(c, ctx.gender ?? null);
+  const n = neutralOf(c, ctx);
+  const xb = c.coef > 0 ? Math.max(x, best) : Math.min(x, best);
+  return CONFIG.BLOOD_OVERLAP * clamp(G * c.coef * (c.log ? Math.log(xb / n) : xb - n), ...CONFIG.BLOOD_BOUNDS);
+}
+
+// Impact d'une valeur saisie pour ctx = { age, gender } (âge au jour de la prise de sang) : { delta, counted, reason }.
+// « < s » : la vraie valeur est plus basse, « > s » plus haute ; si ce côté contient le neutre, impact 0, sinon celui
+// du seuil (borne prudente).
+export function bloodImpact(id, raw, ctx = {}) {
   const c = BLOOD_BY_ID.get(id)?.counted;
   const p = parseLab(raw);
   if (!c) return { delta: 0, counted: false, reason: 'suivie, sans effet sur l\'âge bio' };
@@ -862,39 +923,48 @@ export function bloodImpact(id, raw, gender = null) {
   if (c.max !== undefined && (p.v > c.max || (p.q === '>' && p.v >= c.max)) && p.q !== '<') {
     return { delta: 0, counted: false, reason: `au-delà de ${fmt(c.max)} ${refUnit(id)} : infection ou inflammation probable, à refaire au calme` };
   }
-  const d = bloodRaw(c, p.v, gender);
+  const d = bloodRaw(c, p.v, ctx);
   if (!p.q) return { delta: d, counted: true, reason: null };
   const below = (p.q === '<') === (c.coef > 0);   // impact réel ≤ d
   return { delta: below ? Math.min(d, 0) : Math.max(d, 0), counted: true, reason: null };
 }
 
 // Barème d'affichage d'un marqueur compté : [valeur, Δ], linéaire entre les points, constant au-delà ;
-// CRP : points de la courbe logarithmique, jusqu'à 10 mg/L.
-function bloodScale(c, gender) {
-  const best = bestOf(c, gender);
+// CRP : points de la courbe logarithmique, jusqu'à 10 mg/L. Points ramenés dans les valeurs plausibles (range).
+// b : analyse de CONFIG.BLOOD ; ctx = { age, gender }.
+function bloodScale(b, ctx) {
+  const c = b.counted;
+  const best = bestOf(c, ctx.gender ?? null);
+  const n = neutralOf(c, ctx);
   const [lo, hi] = CONFIG.BLOOD_BOUNDS;
   let xs;
   if (c.log) {
-    xs = [best, 0.5, 1, c.neutral, 2, 3, 5, c.max].filter(x => x >= best);
+    xs = [best, 0.5, 1, n, 2, 3, 5, c.max].filter(x => x >= best);
   } else {
     const k = G * c.coef;                  // années par unité
-    const at = y => c.neutral + y / k;     // valeur où l'impact vaut y
-    xs = [c.coef > 0 ? Math.max(best, at(lo)) : Math.min(best, at(lo)), c.neutral, at(hi)];
+    const at = y => n + y / k;             // valeur où l'impact vaut y
+    xs = [c.coef > 0 ? Math.max(best, at(lo)) : Math.min(best, at(lo)), n, at(hi)];
   }
-  return [...new Set(xs)].sort((a, b) => a - b).map(x => [x, bloodRaw(c, x, gender)]);
+  xs = xs.map(x => clamp(x, ...b.range));
+  return [...new Set(xs)].sort((x, y) => x - y).map(x => [x, bloodRaw(c, x, ctx)]);
 }
 
 // Marqueurs comptés au jour asOf : pour chacun, la valeur la plus récente des prises de sang datées des 365 jours
-// qui finissent ce jour-là. → { items: [{ id, value, raw, date, delta, present, reason }], gap, systems, latest }
-export function bloodAt(bilans, asOf, gender = null) {
+// qui finissent ce jour-là, comparée au neutre de l'âge qu'on avait le jour de cette prise de sang.
+// profile = { gender, ageAt: jour → âge décimal ou null }.
+// → { items: [{ id, value, raw, date, age, delta, present, reason }], gap, systems, latest }
+export function bloodAt(bilans, asOf, profile = {}) {
+  const gender = profile.gender ?? null;
+  const ageAt = typeof profile.ageAt === 'function' ? profile.ageAt : () => null;
   const from = addDays(asOf, -(CONFIG.BLOOD_VALID_DAYS - 1));
   const usable = (bilans ?? []).filter(b => b.date >= from && b.date <= asOf).sort((a, b) => (a.date < b.date ? 1 : -1));
   const items = BLOOD_COUNTED.map(id => {
     const b = usable.find(x => parseLab(x.valeurs?.[id]) !== null);
-    if (!b) return { id, value: null, raw: null, date: null, delta: 0, present: false, reason: null };
+    if (!b) return { id, value: null, raw: null, date: null, age: null, delta: 0, present: false, reason: null };
     const raw = b.valeurs[id];
-    const imp = bloodImpact(id, raw, gender);
-    return { id, value: parseLab(raw).v, raw, date: b.date, delta: imp.delta, present: imp.counted, reason: imp.reason };
+    const age = ageAt(b.date);
+    const imp = bloodImpact(id, raw, { age, gender });
+    return { id, value: parseLab(raw).v, raw, date: b.date, age, delta: imp.delta, present: imp.counted, reason: imp.reason };
   });
   const systems = Object.entries(CONFIG.BLOOD_SYSTEMS).map(([key, label]) => {
     const xs = items.filter(x => x.present && BLOOD_BY_ID.get(x.id).counted.system === key);
@@ -1128,7 +1198,7 @@ function evaluate(m, X, opts = {}) {
   const w182 = windowIndicators(m, dayEnd, CONFIG.AGE_WINDOW_DAYS, X, opts);
   const w30 = windowIndicators(m, dayEnd, CONFIG.PACE_WINDOW_DAYS, X, opts);
   const civil = m.ageAt(dayEnd);
-  const blood = bloodAt(m.bilans, X, m.gender);
+  const blood = bloodAt(m.bilans, X, { gender: m.gender, ageAt: m.ageAt });
   const gap = w182.gap + blood.gap;
   // G30 : un indicateur absent sur 30 jours reprend sa contribution sur 182 jours.
   const g30 = IDS.reduce((a, id) => a + (w30.ind[id].present ? w30.ind[id].delta : w182.ind[id].delta), 0) + blood.gap;
@@ -1396,7 +1466,7 @@ export function analyze(base, opts = {}) {
 
 // ================= Export Gadgetbridge : tables et codes =================
 
-export const APP_VERSION = '2.4.0';
+export const APP_VERSION = '2.6.0';
 
 // Tables lues (schéma Gadgetbridge 160, GBDaoGenerator.java).
 const T_ACT = 'XIAOMI_ACTIVITY_SAMPLE';
