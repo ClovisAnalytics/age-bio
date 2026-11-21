@@ -1150,17 +1150,35 @@ body:not(.has-tabs) .tabbar { transform: translate3d(0, calc(100% + 40px), 0); o
 .btn-danger { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn-text); }
 .card-text { margin: 0; line-height: 1.5; color: var(--text-2); }
 .blood-table td { font-family: var(--font-num); font-stretch: 87.5%; }
-.blood-table tbody th { font-weight: 400; }
-.blood-table tbody tr.is-counted th { font-weight: 700; }
+.blood-table tbody th { font-weight: 600; }
 .blood-table th small { display: block; font-size: 11.5px; font-weight: 400; color: var(--text-3); }
 .field-set { margin-top: 12px; }
 .field-set .card-title { margin-bottom: 2px; }
 .field { display: grid; gap: 6px; padding: 10px 0; }
 .field + .field { border-top: 1px solid var(--line); }
 .field-label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: 15px; font-weight: 600; }
-.field-label small { flex-basis: 100%; font-size: 12.5px; font-weight: 400; color: var(--text-3); }
-.field-tag { padding: 2px 7px; border-radius: 9px; background: var(--chip-bg); color: var(--chip-text); font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .field-box { display: flex; align-items: center; gap: 10px; }
+/* Analyse du formulaire : rang et poids en tête, puis saisie et unité, exemple, messages (décalés sous le nom). */
+.bf { gap: 6px; padding: 14px 0; }
+.bf > :not(.bf-head) { margin-left: 38px; }
+.bf-head { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; column-gap: 10px; }
+.bf-rank { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--chip-bg); color: var(--chip-text); font-size: 14px; font-weight: 700; }
+.bf-name { font-size: 16px; font-weight: 700; }
+.bf-weight { display: flex; flex-direction: column; align-items: flex-end; line-height: 1; }
+.bf-weight b { font-size: 18px; font-weight: 700; }
+.bf-weight small { margin-top: 4px; font-size: 11.5px; color: var(--text-3); white-space: nowrap; }
+.bf-aka { margin-top: -2px; margin-bottom: 0; font-size: 12.5px; line-height: 1.4; color: var(--text-3); }
+.bf .field-box { flex-wrap: wrap; gap: 8px 10px; }
+.bf .field-input { flex: 1 1 110px; }
+.bf-ex { margin-top: 0; margin-bottom: 0; font-size: 12.5px; line-height: 1.45; color: var(--text-2); }
+.field-info { margin: 0; font-size: 13px; line-height: 1.4; color: var(--chip-text); }
+/* Choix d'unité : boutons radio natifs (clavier, lecteurs d'écran) habillés en sélecteur segmenté. */
+.units { display: inline-flex; flex: none; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-sunk); }
+.unit-opt { position: relative; display: block; }
+.unit-opt input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.unit-opt span { display: grid; place-items: center; min-width: 44px; min-height: 38px; padding: 0 9px; border-radius: 7px; font-size: 13.5px; font-weight: 600; color: var(--text-2); white-space: nowrap; transition: background-color .15s, color .15s; }
+.unit-opt input:checked + span { background: var(--btn-bg); color: var(--btn-fg); }
+.unit-opt input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 1px; }
 .field-input {
   flex: 1;
   min-width: 0;

@@ -228,24 +228,51 @@ const valText = (id, v) => IND[id].fmt(v).filter(Boolean).join(NBSP);
 const GROUP_NAME = { sleep: 'Sommeil', activity: 'Activité', fitness: 'Forme', blood: 'Prise de sang' };
 
 // Marqueurs sanguins comptés (CONFIG.BLOOD de calc.js), décrits comme les indicateurs pour réutiliser barViz.
-// BLOOD_VIEW : axe de la barre, affichage seulement.
+// BLOOD_VIEW : axe de la barre, dans l'unité du modèle, affichage seulement.
 const BLOOD_VIEW = { vgm: [75, 105], idr: [11, 16], leucocytes: [3, 12], lymphocytes: [10, 50], glycemie: [3.5, 8], creatinine: [40, 130], albumine: [30, 55], pal: [30, 160], crp: [0, 10] };
-const labFmt = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 });
-// Valeur de laboratoire telle que saisie : « 4,2 », « < 5 ».
-const labText = raw => {
-  const p = calc.parseLab(raw);
-  return p ? `${p.q ? `${p.q}${NBSP}` : ''}${labFmt.format(p.v)}` : '';
+// Unités : celle que tu choisis pour chaque analyse (celle de ton compte rendu, mémorisée avec les prises de sang) sert
+// à la saisie et à l'affichage ; les valeurs restent gardées dans l'unité du modèle. Un nombre de lymphocytes (G/L,
+// /mm³) se saisit, mais s'affiche en % : c'est le % qui compte, et un nombre dépend des leucocytes de chaque bilan.
+const labNfs = new Map();
+const labNf = dp => {
+  if (!labNfs.has(dp)) labNfs.set(dp, new Intl.NumberFormat('fr-FR', { maximumFractionDigits: dp }));
+  return labNfs.get(dp);
 };
+const unitInfo = (id, u) => calc.bloodMarker(id)?.units.find(x => x.u === u) ?? null;
+const entryUnit = id => (unitInfo(id, blood.units[id]) ? blood.units[id] : calc.refUnit(id));
+const labUnit = id => (unitInfo(id, entryUnit(id)).abs !== undefined ? calc.refUnit(id) : entryUnit(id));
+// Nombre dans l'unité u, avec ses décimales : « 6 800 », « 0,97 ».
+const labNum = (id, v, u) => labNf(unitInfo(id, u)?.dp ?? 2).format(v);
+// Valeur gardée (unité du modèle ; nombre, ou texte « <4 ») → texte dans l'unité u : « 6 800 », « < 0,5 ».
+// ctx.leucocytes : lymphocytes en nombre. '' si la conversion est impossible.
+function labIn(id, raw, u = labUnit(id), ctx = {}) {
+  const p = calc.parseLab(raw);
+  const v = p ? calc.labFromRef(id, p.v, u, ctx) : null;
+  return v === null ? '' : `${p.q ? `${p.q}${NBSP}` : ''}${labNum(id, v, u)}`;
+}
 // Nom dans une phrase : « glycémie à jeun », sigles inchangés (« IDR »).
 const inSentence = name => (/^[A-Z0-9]+$/.test(name) ? name : name.charAt(0).toLowerCase() + name.slice(1));
 for (const b of calc.CONFIG.BLOOD) {
-  if (!b.counted) continue;
   const [lo, hi] = BLOOD_VIEW[b.id] ?? [0, 100];
   IND[b.id] = {
-    name: b.label, short: inSentence(b.label), group: 'blood', icon: 'drop', range: [lo, hi], ends: [labFmt.format(lo), labFmt.format(hi)],
-    fmt: v => [labFmt.format(v), b.unit], x: x => `${labFmt.format(x)}${NBSP}${b.unit}`, src: 'Levine 2018 ; Liu 2018', unit: b.unit,
+    name: b.label, short: inSentence(b.label), group: 'blood', icon: 'drop', range: [lo, hi], src: 'Levine 2018 ; Liu 2018',
+    get ends() { return [labIn(b.id, lo), labIn(b.id, hi)]; },
+    get unit() { return labUnit(b.id); },
+    fmt: v => [labIn(b.id, v), labUnit(b.id)], x: v => `${labIn(b.id, v)}${NBSP}${labUnit(b.id)}`,
   };
 }
+// Poids (Pareto) : % entiers de somme 100 (plus forts restes), cumul, rang ; du plus au moins influent.
+const BLOOD_PARETO = (() => {
+  const w = [...calc.bloodWeights()];
+  const raw = w.map(([, x]) => x * 100);
+  const pcts = raw.map(Math.floor);
+  const left = 100 - pcts.reduce((a, x) => a + x, 0);
+  raw.map((x, i) => [x - Math.floor(x), i]).sort((a, b) => b[0] - a[0]).slice(0, left).forEach(([, i]) => { pcts[i] += 1; });
+  let cum = 0;
+  return new Map(w.map(([id], i) => [id, { rank: i + 1, pct: pcts[i], cum: (cum += pcts[i]) }]));
+})();
+const BLOOD_ORDER = [...BLOOD_PARETO.keys()];
+const weightText = id => `${BLOOD_PARETO.get(id)?.pct ?? 0}${NBSP}%`;
 // « 12 mars 2026 »
 const dayMonthYear = key => `${dayMonth(key)} ${key.slice(0, 4)}`;
 
@@ -292,10 +319,13 @@ const impactCls = d => (round1(d) > 0 ? 'is-bad' : round1(d) < 0 ? 'is-good' : '
 
 // ================= Prises de sang : mémoire de l'app, sur ce téléphone =================
 
-// Stockage local du navigateur (origine du site) : seules les prises de sang y sont gardées, jamais envoyées.
-// Démo : prises de sang fictives, en mémoire seulement (le stockage n'est ni lu ni écrit).
+// Stockage local du navigateur (origine du site) : seules les prises de sang y sont gardées, avec l'unité choisie pour
+// chaque analyse ; jamais envoyées. Démo : prises de sang fictives, en mémoire seulement (le stockage n'est ni lu ni écrit).
 const BLOOD_KEY = 'agebio.prises-de-sang';
-const blood = { list: [], demo: false };
+const blood = { list: [], units: {}, demo: false };
+// Unités lues (mémoire, sauvegarde) : analyses et unités connues seulement.
+const cleanUnits = o => Object.fromEntries(Object.entries(o && typeof o === 'object' ? o : {})
+  .filter(([id, u]) => typeof u === 'string' && unitInfo(id, u)));
 function bloodLoad() {
   if (DEMO !== null) {
     blood.demo = true;
@@ -304,15 +334,18 @@ function bloodLoad() {
   }
   try {
     const raw = localStorage.getItem(BLOOD_KEY);
-    blood.list = raw ? calc.cleanBilans(JSON.parse(raw)?.bilans) : [];
+    const data = raw ? JSON.parse(raw) : null;
+    blood.list = calc.cleanBilans(data?.bilans);
+    blood.units = cleanUnits(data?.unites);
   } catch {
     blood.list = [];
+    blood.units = {};
   }
 }
 function bloodSave() {
   if (blood.demo) return true;
   try {
-    localStorage.setItem(BLOOD_KEY, JSON.stringify({ v: 1, bilans: blood.list }));
+    localStorage.setItem(BLOOD_KEY, JSON.stringify({ v: 1, bilans: blood.list, unites: blood.units }));
     navigator.storage?.persist?.().catch(() => {});   // demande au navigateur de ne pas l'effacer de lui-même
     return true;
   } catch {
@@ -978,7 +1011,6 @@ function indSection(g, m) {
 // Sans valeur, une invitation à saisir.
 const influence = id => calc.bloodInfluence(id);
 const byInfluence = (a, b) => influence(b.id ?? b) - influence(a.id ?? a);
-const influenceText = id => `±${dec1(influence(id))}${NBSP}${yearWord(influence(id))}`;
 // « a, b et c », sans majuscule (après deux-points).
 const joinFr = names => (names.length > 1 ? `${names.slice(0, -1).join(', ')} et ${names[names.length - 1]}` : names[0] ?? '');
 const COUNT_WORD = { 2: 'deux', 3: 'trois', 4: 'quatre', 5: 'cinq' };
@@ -1003,7 +1035,7 @@ function bloodSection(m) {
   const ahead = Math.min(5, missing.filter(x => influence(x.id) > strongest).length);
   const next = missing.length
     ? h('p', { class: 'blood-next' },
-      `À demander au prochain bilan, de la plus influente à la moins influente : ${joinFr(missing.slice(0, 5).map(x => `${IND[x.id].short} (${influenceText(x.id)})`))}${missing.length > 5 ? '…' : ''}.`,
+      `À demander au prochain bilan, de la plus influente à la moins influente : ${joinFr(missing.slice(0, 5).map(x => `${IND[x.id].short} (poids ${weightText(x.id)})`))}${missing.length > 5 ? '…' : ''}.`,
       ahead ? ` ${ahead === 1 ? 'La première pèse' : `Les ${COUNT_WORD[ahead] ?? ahead} premières pèsent`} plus que chacune de tes analyses actuelles.` : '')
     : null;
   return h('section', { class: 'section', 'aria-labelledby': 'sec-blood' }, head, next,
@@ -1013,7 +1045,7 @@ function bloodSection(m) {
 }
 function bloodRow(x, m, latest) {
   const meta = IND[x.id];
-  const shown = labText(x.raw);
+  const shown = labIn(x.id, x.raw);
   const ind = { id: x.id, present: x.present, estimated: false, value6m: x.value, value30: null, delta: x.delta, display: [shown, meta.unit] };
   const label = `${meta.name} : ${shown} ${meta.unit}, prise de sang du ${dayMonthYear(x.date)}, ${x.present ? `impact ${signed1(x.delta)} ${yearWord(x.delta)} sur ton âge bio` : `non comptée, ${x.reason}`}`;
   return h('div', { class: `ind-row is-static${x.present ? '' : ' is-absent'}`, role: 'group', 'aria-label': label },
@@ -1452,30 +1484,30 @@ function renderBlood() {
   const list = blood.list;
   const kids = [
     topbar({ title: 'Prises de sang', sub: blood.demo ? 'Démonstration : rien n\'est gardé' : 'Gardées sur ce téléphone', back: true }),
-    h('p', { class: 'page-lede' }, "Dans la mémoire de l'app, sur ce téléphone : jamais envoyées, jamais dans le Diagnostic. 9 analyses courantes comptent dans ton âge bio pendant 12 mois ; les autres sont suivies."),
+    h('p', { class: 'page-lede' }, "Dans la mémoire de l'app, sur ce téléphone : jamais envoyées, jamais dans le Diagnostic. Les 9 analyses de ton âge bio, de la plus à la moins influente, dans les unités de ton compte rendu ; une prise de sang compte 12 mois."),
     h('a', { class: 'btn btn-primary btn-block', href: '#bilan/nouveau' }, icon('plus'), 'Ajouter une prise de sang'),
   ];
   if (list.length) {
-    // Suivi : une ligne par analyse, une colonne par prise de sang (les 6 plus récentes).
+    // Suivi : une ligne par analyse (par poids), une colonne par prise de sang (les 6 plus récentes).
     const cols = list.slice(0, 6);
-    const rows = calc.CONFIG.BLOOD.filter(b => cols.some(c => c.valeurs[b.id] !== undefined));
+    const rows = BLOOD_ORDER.filter(id => cols.some(c => c.valeurs[id] !== undefined));
     const table = h('table', { class: 'data-table blood-table' },
       h('caption', { class: 'visually-hidden' }, 'Valeurs de tes prises de sang, de la plus récente à la plus ancienne'),
       h('thead', null, h('tr', null, h('th', { scope: 'col' }, 'Analyse'), cols.map(c => h('th', { scope: 'col' }, dayMonthYear(c.date))))),
-      h('tbody', null, rows.map(b => h('tr', { class: b.counted ? 'is-counted' : '' },
-        h('th', { scope: 'row' }, b.label, h('small', null, b.unit)),
-        cols.map(c => h('td', null, c.valeurs[b.id] !== undefined ? labText(c.valeurs[b.id]) : '—'))))));
+      h('tbody', null, rows.map(id => h('tr', null,
+        h('th', { scope: 'row' }, IND[id].name, h('small', null, labUnit(id))),
+        cols.map(c => h('td', null, c.valeurs[id] !== undefined ? labIn(id, c.valeurs[id]) : '—'))))));
     kids.push(
-      h('section', { class: 'section', 'aria-labelledby': 'b-follow' },
-        secHead('Suivi', 'b-follow', false, h('span', { class: 'sec-aside' }, "en gras : compte dans l'âge bio")),
-        h('div', { class: 'card table-card' }, h('div', { class: 'scroll-x', tabindex: '0', role: 'region', 'aria-label': 'Tableau des prises de sang' }, table))),
+      rows.length ? h('section', { class: 'section', 'aria-labelledby': 'b-follow' },
+        secHead('Suivi', 'b-follow'),
+        h('div', { class: 'card table-card' }, h('div', { class: 'scroll-x', tabindex: '0', role: 'region', 'aria-label': 'Tableau des prises de sang' }, table))) : null,
       h('section', { class: 'section', 'aria-labelledby': 'b-list' }, secHead('Historique', 'b-list'),
         h('div', { class: 'card list' }, list.map(b => {
-          const n = Object.keys(b.valeurs).length;
-          const k = calc.BLOOD_COUNTED.filter(id => b.valeurs[id] !== undefined).length;
+          const ids = BLOOD_ORDER.filter(id => b.valeurs[id] !== undefined);
+          const covered = ids.reduce((a, id) => a + BLOOD_PARETO.get(id).pct, 0);
           return h('a', { class: 'list-row', href: `#bilan/${b.date}` }, h('span', { class: 'list-icon' }, icon('drop')),
             h('span', { class: 'list-main' }, h('span', { class: 'list-label' }, capital(dayMonthYear(b.date))),
-              h('span', { class: 'list-sub' }, `${plural(n, 'analyse')} · ${k} sur ${calc.BLOOD_COUNTED.length} pour l'âge bio`)),
+              h('span', { class: 'list-sub' }, `${ids.length} analyse${ids.length > 1 ? 's' : ''} sur ${BLOOD_ORDER.length} · ${covered}${NBSP}% du poids`)),
             icon('next', 'list-chev'));
         }))));
   } else {
@@ -1490,60 +1522,171 @@ function renderBlood() {
   fill($('v-sang'), kids);
 }
 
-// Saisie : date, puis les analyses du compte rendu (toutes facultatives), dans l'ordre d'un laboratoire.
+// Exemple d'une analyse dans chacune de ses unités, puis le piège de saisie :
+// « Exemple : 5,4 mmol/L = 0,97 g/L = 97 mg/dL. »
+function exampleLine(id) {
+  const b = calc.bloodMarker(id);
+  const show = x => `${labNum(id, x.ex, x.u)}${NBSP}${x.u}`;
+  const same = b.units.filter(x => x.abs === undefined).map(show);
+  const abs = b.units.filter(x => x.abs !== undefined).map(show);
+  const l = calc.bloodMarker('leucocytes').units[0];
+  const text = `Exemple : ${same.join(' = ')}${abs.length ? ` ; en nombre, environ ${abs.join(' = ')} (avec ${show(l)} de leucocytes)` : ''}.`;
+  return b.tip ? `${text} ${capital(b.tip)}.` : text;
+}
+const placeholderOf = (id, u) => `ex. ${labNum(id, unitInfo(id, u).ex, u)}`;
+
+// Saisie : date, puis les 9 analyses de l'âge bio (toutes facultatives), de la plus à la moins influente : une case
+// vide en haut de liste, c'est l'analyse à demander en priorité. Chaque valeur se saisit dans l'unité du compte rendu
+// (choix mémorisé) ; une valeur qui n'a de sens que dans une autre unité fait basculer l'unité, avec un message.
 function renderBilanForm(param) {
   const editing = param === 'nouveau' ? null : blood.list.find(b => b.date === param) ?? null;
   const today = clock.dayKey(Date.now());
-  const field = b => {
-    const id = `f-${b.id}`;
-    const v = editing?.valeurs?.[b.id];
-    return h('div', { class: 'field' },
-      h('label', { class: 'field-label', for: id }, h('span', null, b.label), b.counted ? h('span', { class: 'field-tag' }, 'âge bio') : null,
-        b.full ? h('small', null, b.full) : null),
-      h('span', { class: 'field-box' },
-        h('input', {
-          class: 'field-input num', id, name: b.id, type: 'text', inputmode: b.text ? 'text' : 'decimal', autocomplete: 'off',
-          autocapitalize: 'off', spellcheck: 'false', enterkeyhint: 'next', value: v !== undefined ? labText(v).replace(NBSP, ' ') : '',
-          placeholder: b.text ? 'ex. 2,1 ou < 5' : '', 'aria-describedby': `e-${b.id}`,
-        }),
-        h('span', { class: 'field-unit', 'aria-hidden': 'true' }, b.unit)),
-      h('p', { class: 'field-error', id: `e-${b.id}`, hidden: true }));
+  const stored = editing?.valeurs ?? {};
+  const leuco0 = calc.parseLab(stored.leucocytes)?.v ?? null;
+  const switched = new Map();   // unités basculées d'elles-mêmes : id → { to, text }
+  const manual = new Set();     // unités choisies à la main pendant cette saisie
+  // Unité de départ : la dernière choisie ; un nombre de lymphocytes sans leucocytes dans ce bilan : le %.
+  const startUnit = id => {
+    const u = entryUnit(id);
+    return unitInfo(id, u).abs !== undefined && stored[id] !== undefined && !(leuco0 > 0) ? calc.refUnit(id) : u;
   };
-  const sections = [...new Set(calc.CONFIG.BLOOD.map(b => b.section))];
+  const field = id => {
+    const b = calc.bloodMarker(id);
+    const w = BLOOD_PARETO.get(id);
+    const u0 = startUnit(id);
+    const text0 = stored[id] !== undefined ? labIn(id, stored[id], u0, { leucocytes: leuco0 }).replace(NBSP, ' ') : '';
+    const units = b.units.length > 1
+      ? h('span', { class: 'units', role: 'radiogroup', 'aria-label': `Unité de ${inSentence(b.label)}` },
+        b.units.map(x => h('label', { class: 'unit-opt' },
+          h('input', { type: 'radio', name: `u-${id}`, value: x.u, checked: x.u === u0 }),
+          h('span', null, x.u))))
+      : h('span', { class: 'field-unit' }, b.units[0].u);
+    return h('div', { class: 'field bf', 'data-id': id },
+      h('div', { class: 'bf-head' },
+        h('span', { class: 'bf-rank num', 'aria-hidden': 'true' }, w.rank),
+        h('label', { class: 'bf-name', for: `f-${id}` }, b.label, h('span', { class: 'visually-hidden' }, `, poids ${w.pct} %`)),
+        h('span', { class: 'bf-weight', 'aria-hidden': 'true' }, h('b', { class: 'num' }, `${w.pct}${NBSP}%`), h('small', null, `cumul ${w.cum}${NBSP}%`))),
+      h('p', { class: 'bf-aka' }, b.aka),
+      h('div', { class: 'field-box' },
+        h('input', {
+          class: 'field-input num', id: `f-${id}`, name: id, type: 'text', inputmode: b.text ? 'text' : 'decimal', autocomplete: 'off',
+          autocapitalize: 'off', spellcheck: 'false', enterkeyhint: 'next', value: text0, 'data-initial': text0, 'data-unit0': u0,
+          placeholder: placeholderOf(id, u0), 'aria-describedby': `x-${id} i-${id} e-${id}`,
+        }),
+        units),
+      h('p', { class: 'bf-ex', id: `x-${id}` }, exampleLine(id)),
+      h('p', { class: 'field-info', id: `i-${id}`, role: 'status', hidden: true }),
+      h('p', { class: 'field-error', id: `e-${id}`, hidden: true }));
+  };
   const form = h('form', { class: 'blood-form', novalidate: true },
     h('div', { class: 'card' },
       h('div', { class: 'field' },
         h('label', { class: 'field-label', for: 'f-date' }, 'Date du prélèvement'),
         h('span', { class: 'field-box' }, h('input', { class: 'field-input', id: 'f-date', name: 'date', type: 'date', required: true, max: today, value: editing?.date ?? today, 'aria-describedby': 'e-date' })),
         h('p', { class: 'field-error', id: 'e-date', hidden: true }))),
-    note("Remplis seulement ce qui figure sur ton compte rendu, dans l'unité indiquée ; « < 5 » est accepté. Les analyses marquées âge bio comptent dans ton âge bio."),
-    sections.map((sec, i) => h('div', { class: 'card field-set', role: 'group', 'aria-labelledby': `fs-${i}` },
-      h('p', { class: 'card-title', id: `fs-${i}` }, sec),
-      calc.CONFIG.BLOOD.filter(b => b.section === sec).map(field))),
+    note(`Les 9 analyses de ton âge bio, de la plus à la moins influente. Poids : part de l'analyse dans les écarts d'âge bio dus à la prise de sang ; les 3 premières font ${BLOOD_PARETO.get(BLOOD_ORDER[2]).cum}${NBSP}%. Remplis ce qui figure sur ton compte rendu, dans son unité : une case vide en haut de liste, c'est l'analyse à demander en priorité au prochain bilan.`),
+    h('div', { class: 'card field-set', role: 'group', 'aria-labelledby': 'fs-blood' },
+      h('p', { class: 'card-title', id: 'fs-blood' }, 'Analyses, par poids'),
+      BLOOD_ORDER.map(field)),
     h('p', { class: 'field-error form-error', id: 'e-form', hidden: true }),
     h('button', { class: 'btn btn-primary btn-block', type: 'submit' }, 'Enregistrer'),
     editing ? h('button', { class: 'btn btn-danger btn-block', type: 'button', 'data-action': 'blood-delete' }, 'Supprimer cette prise de sang') : null);
+
+  const unitSel = id => form.querySelector(`input[name="u-${id}"]:checked`)?.value ?? calc.refUnit(id);
+  const setUnit = (id, u) => {
+    for (const r of form.querySelectorAll(`input[name="u-${id}"]`)) r.checked = r.value === u;
+    $(`f-${id}`).placeholder = placeholderOf(id, u);
+  };
+  // Leucocytes saisis, dans l'unité du modèle : un nombre de lymphocytes se ramène en % avec eux.
+  const leucoNow = () => {
+    const p = calc.parseLab(form.elements.namedItem('leucocytes').value);
+    return p ? calc.labToRef('leucocytes', p.v, unitSel('leucocytes')) : null;
+  };
+  // Valeur dans une unité improbable : bascule vers la seule unité où elle a du sens.
+  const autoUnit = id => {
+    const text = $(`f-${id}`).value.trim();
+    const alt = text && !manual.has(id) ? calc.guessLabUnit(id, text, unitSel(id), { leucocytes: leucoNow() }) : null;
+    if (alt) {
+      setUnit(id, alt);
+      switched.set(id, { to: alt, text });
+    } else if (!text || switched.get(id)?.text !== text) switched.delete(id);
+  };
+  // Message sous la case : unité basculée ; lymphocytes en nombre : le % calculé.
+  const refresh = id => {
+    const msgs = [];
+    const s = switched.get(id);
+    if (s) msgs.push(`${s.text} ressemble à des ${s.to} : unité changée.`);
+    if (id === 'lymphocytes' && unitInfo(id, unitSel(id)).abs !== undefined) {
+      const p = calc.parseLab($(`f-${id}`).value);
+      const l = leucoNow();
+      const v = p && l ? calc.labToRef(id, p.v, unitSel(id), { leucocytes: l }) : null;
+      if (p) msgs.push(v !== null ? `Soit ${labNum(id, v, '%')}${NBSP}% des leucocytes.` : 'Saisis aussi les leucocytes : le % se calcule avec eux.');
+    }
+    const el = $(`i-${id}`);
+    el.textContent = msgs.join(' ');
+    el.hidden = !msgs.length;
+  };
+  const clearError = id => {
+    $(`e-${id}`).hidden = true;
+    $(`f-${id}`).removeAttribute('aria-invalid');
+  };
+  form.addEventListener('change', e => {
+    const id = e.target.closest('.bf')?.dataset.id;
+    if (!id) return;
+    if (e.target.type === 'radio') {
+      manual.add(id);
+      switched.delete(id);
+      setUnit(id, e.target.value);
+    } else autoUnit(id);
+    clearError(id);
+    refresh(id);
+    if (id === 'leucocytes') {
+      autoUnit('lymphocytes');
+      refresh('lymphocytes');
+    }
+  });
+  form.addEventListener('input', e => {
+    const id = e.target.closest('.bf')?.dataset.id;
+    if (id === 'lymphocytes' || id === 'leucocytes') refresh('lymphocytes');
+  });
   form.addEventListener('submit', e => {
     e.preventDefault();
-    saveBilan(form, editing);
+    saveBilan(form, editing, { unitSel, switched });
   });
   fill($('v-bilan'),
     topbar({ title: editing ? 'Prise de sang' : 'Nouvelle prise de sang', sub: editing ? dayMonthYear(editing.date) : 'Gardée sur ce téléphone', back: true }),
     form);
 }
-function saveBilan(form, editing) {
+function saveBilan(form, editing, { unitSel, switched }) {
   const errs = new Map();
   const today = clock.dayKey(Date.now());
   const date = form.elements.namedItem('date').value;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > today) errs.set('date', 'Choisis la date du prélèvement, aujourd\'hui ou avant.');
   else if (blood.list.some(b => b.date === date && b !== editing)) errs.set('date', "Une prise de sang existe déjà à cette date : ouvre-la depuis l'historique.");
   const valeurs = {};
-  for (const b of calc.CONFIG.BLOOD) {
-    const text = form.elements.namedItem(b.id).value.trim();
+  const used = new Set();   // analyses saisies ou modifiées : leur unité devient la préférée
+  const ctx = {};
+  const same = id => {
+    const input = form.elements.namedItem(id);
+    return input.value.trim() === input.dataset.initial && unitSel(id) === input.dataset.unit0;
+  };
+  // Leucocytes d'abord : un nombre de lymphocytes se ramène en % avec eux.
+  for (const id of ['leucocytes', ...BLOOD_ORDER.filter(x => x !== 'leucocytes')]) {
+    const text = form.elements.namedItem(id).value.trim();
     if (!text) continue;
-    const r = calc.checkLab(b.id, text);
-    if (r.error) errs.set(b.id, r.error);
-    else valeurs[b.id] = r.value;
+    const abs = unitInfo(id, unitSel(id)).abs !== undefined;
+    if (editing?.valeurs[id] !== undefined && same(id) && (!abs || same('leucocytes'))) {
+      valeurs[id] = editing.valeurs[id];   // inchangée : valeur gardée telle quelle (l'affichage arrondit)
+    } else {
+      const r = calc.checkLab(id, text, unitSel(id), ctx);
+      if (r.error) {
+        errs.set(id, r.error);
+        continue;
+      }
+      valeurs[id] = r.value;
+      used.add(id);
+    }
+    if (id === 'leucocytes') ctx.leucocytes = calc.parseLab(valeurs[id])?.v;
   }
   if (!errs.size && !Object.keys(valeurs).length) errs.set('form', 'Saisis au moins une valeur.');
   for (const el of form.querySelectorAll('.field-error')) el.hidden = true;
@@ -1561,10 +1704,15 @@ function saveBilan(form, editing) {
     toast(errs.size > 1 ? `${errs.size} champs à corriger.` : 'Un champ à corriger.', true);
     return;
   }
-  blood.list = calc.cleanBilans([...blood.list.filter(b => b !== editing), { date, valeurs }]);
+  // Analyses retirées de l'app (CONFIG.BLOOD_KEPT) : valeurs déjà saisies gardées telles quelles.
+  const kept = Object.fromEntries(Object.entries(editing?.valeurs ?? {}).filter(([id]) => !calc.bloodMarker(id)));
+  blood.list = calc.cleanBilans([...blood.list.filter(b => b !== editing), { date, valeurs: { ...kept, ...valeurs } }]);
+  for (const id of used) blood.units[id] = unitSel(id);
   const saved = bloodSave();
   bloodChanged();
-  toast(!saved ? "Gardée jusqu'à la fermeture de l'app : le navigateur refuse l'enregistrement." : blood.demo ? "Démo : gardée jusqu'à la fermeture de l'app." : 'Prise de sang enregistrée sur ce téléphone.', !saved);
+  const fixed = [...switched].filter(([id, s]) => used.has(id) && unitSel(id) === s.to).map(([id, s]) => `${IND[id].short} en ${s.to}`);
+  const msg = !saved ? "Gardée jusqu'à la fermeture de l'app : le navigateur refuse l'enregistrement." : blood.demo ? "Démo : gardée jusqu'à la fermeture de l'app." : 'Prise de sang enregistrée sur ce téléphone.';
+  toast(`${msg}${fixed.length ? ` Unité corrigée : ${joinFr(fixed)}.` : ''}`, !saved);
   goBack('#sang');
 }
 function deleteBilan(date) {
@@ -1579,7 +1727,7 @@ function deleteBilan(date) {
 // Sauvegarde : fichier JSON téléchargé sur le téléphone (rien n'est envoyé).
 function bloodExport() {
   if (!blood.list.length) return;
-  const json = JSON.stringify({ app: 'Âge bio', v: 1, bilans: blood.list }, null, 2);
+  const json = JSON.stringify({ app: 'Âge bio', v: 1, bilans: blood.list, unites: blood.units }, null, 2);
   const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
   const a = h('a', { href: url, download: `prises-de-sang-${clock.dayKey(Date.now())}.json`, hidden: true });
   document.body.append(a);
@@ -1599,6 +1747,7 @@ async function bloodImport(file) {
     const byDate = new Map(blood.list.map(b => [b.date, b]));
     for (const b of incoming) byDate.set(b.date, b);
     blood.list = calc.cleanBilans([...byDate.values()]);
+    blood.units = { ...blood.units, ...cleanUnits(data?.unites) };
     const saved = bloodSave();
     bloodChanged();
     if (route?.screen === 'sang') renderBlood();
@@ -1676,16 +1825,26 @@ function renderMethod() {
     const text = sc ? sc.map(([x, y]) => `${meta.x(x)} → ${signed1(y)}`).join(' ; ') : 'barème indisponible sans date de naissance';
     return h('li', null, h('strong', null, `${id} ${meta.name}`), ` : ${text}.`, finite(t) ? ` Neutre : ${valText(id, t)}.` : '', ' ', h('span', { class: 'muted' }, meta.src));
   }));
-  // Prise de sang : barème de chaque marqueur compté (poids PhenoAge, neutre NHANES IV, bornes), du plus influent
-  // au moins influent.
+  // Prise de sang : poids, barème (coefficient PhenoAge, neutre NHANES IV, bornes) et unités de chaque analyse, du plus
+  // au moins influent ; valeurs dans l'unité du modèle, conversions à la suite.
   const coefFmt = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 5 });
-  $('method-blood').replaceChildren(...[...calc.BLOOD_COUNTED].sort(byInfluence).map(id => {
+  const convFmt = new Intl.NumberFormat('fr-FR', { maximumSignificantDigits: 4 });
+  const refText = (id, v) => `${labNum(id, v, calc.refUnit(id))}${NBSP}${calc.refUnit(id)}`;
+  const unitsText = id => {
+    const us = calc.bloodMarker(id).units;
+    const ref = us[0].u;
+    const conv = us.slice(1).filter(x => x.abs === undefined)
+      .map(x => (x.k >= 1 ? `1 ${x.u} = ${convFmt.format(x.k)} ${ref}` : `1 ${ref} = ${convFmt.format(1 / x.k)} ${x.u}`));
+    const abs = us.some(x => x.abs !== undefined) ? ` ; en nombre (${us.filter(x => x.abs !== undefined).map(x => x.u).join(', ')}), % = lymphocytes ÷ leucocytes × 100` : '';
+    return `${us.map(x => x.u).join(', ')}${conv.length ? ` (${conv.join(' ; ')})` : ''}${abs}`;
+  };
+  $('method-blood').replaceChildren(...BLOOD_ORDER.map(id => {
     const c = calc.bloodMarker(id).counted;
-    const meta = IND[id];
+    const w = BLOOD_PARETO.get(id);
     const sc = scaleOf(id, ctx);
-    const text = sc ? sc.map(([x, y]) => `${meta.x(x)} → ${signed1(y)}`).join(' ; ') : '';
-    const per = c.log ? 'par unité de ln(CRP)' : `par ${meta.unit}`;
-    return h('li', null, h('strong', null, meta.name), ` (${calc.CONFIG.BLOOD_SYSTEMS[c.system].toLowerCase()}, influence ${influenceText(id)}) : ${text}. Neutre : ${valText(id, c.neutral)} ; poids ${coefFmt.format(c.coef).replace('-', MINUS)} ${per}.`);
+    const text = sc ? sc.map(([x, y]) => `${refText(id, x)} → ${signed1(y)}`).join(' ; ') : '';
+    const per = c.log ? 'par unité de ln(CRP)' : `par ${calc.refUnit(id)}`;
+    return h('li', null, h('strong', null, `${w.rank}. ${IND[id].name}`), ` (poids ${w.pct}${NBSP}%, cumul ${w.cum}${NBSP}% ; ${calc.CONFIG.BLOOD_SYSTEMS[c.system].toLowerCase()}) : ${text}. Neutre : ${refText(id, c.neutral)} ; coefficient ${coefFmt.format(c.coef).replace('-', MINUS)} ${per}. Unités : ${unitsText(id)}.`);
   }));
   const version = calc.CONFIG?.METHOD_VERSION ?? calc.CONFIG?.VERSION ?? null;
   $('method-version').textContent = `Âge bio ${APP_VERSION}${version ? ` · méthode ${version}` : ''} · constantes et sources dans CONFIG (calc.js).`;

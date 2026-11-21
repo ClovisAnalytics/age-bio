@@ -169,13 +169,13 @@ export const CONFIG = {
   MET_ML: 3.5,                  // 1 MET = 3,5 ml/kg/min
 
   // ---------- Prise de sang (méthode 2.3) ----------
-  // Saisie dans l'app, gardée sur le téléphone (app.js) ; ici, calcul seulement.
-  // Poids PhenoAge : Levine ME et al., An epigenetic biomarker of aging for lifespan and healthspan, Aging (Albany NY)
-  // 2018;10(4):573-591, tableau 1 (C) : ln HR de mortalité toutes causes par unité, modèle de Gompertz à 9 marqueurs
-  // et l'âge, NHANES III. Phosphatases alcalines 0,00188 et équation : correctif de Liu Z et al., PLoS Med
-  // 2018;15(12):e1002718 (C, PLoS Med 2019;16(2):e1002760). Les 9 poids sont estimés ensemble : un marqueur ne
+  // Saisie dans l'app, gardée sur le téléphone (app.js) ; ici, calcul et unités seulement.
+  // Coefficients PhenoAge (coef) : Levine ME et al., An epigenetic biomarker of aging for lifespan and healthspan, Aging
+  // (Albany NY) 2018;10(4):573-591, tableau 1 (C) : ln HR de mortalité toutes causes par unité, modèle de Gompertz à
+  // 9 marqueurs et l'âge, NHANES III. Phosphatases alcalines 0,00188 et équation : correctif de Liu Z et al., PLoS Med
+  // 2018;15(12):e1002718 (C, PLoS Med 2019;16(2):e1002760). Les 9 coefficients sont estimés ensemble : un marqueur ne
   // recompte pas ce qu'un autre compte déjà (C) ; le recouvrement avec les indicateurs du bracelet n'est pas corrigé (D).
-  // Impact = G × poids × (valeur − neutre), même conversion que les autres indicateurs ; CRP : G × poids × ln(CRP /
+  // Impact = G × coef × (valeur − neutre), même conversion que les autres indicateurs ; CRP : G × coef × ln(CRP /
   // neutre). PhenoAge convertit avec 1 / 0,09165 ≈ 10,9 ans par unité de ln HR (D : on garde G = 10).
   // Neutre = moyenne de la population de validation (C : NHANES IV 1999-2010, 11 432 adultes, tableau S1 de Liu 2018 ;
   // unités du tableau erronées pour l'albumine et la CRP). CRP : moyenne géométrique déduite de 0,4 ± 1,0 mg/dL en loi
@@ -184,8 +184,10 @@ export const CONFIG = {
   // pas un gain) ; créatinine par sexe (D : H 59, F 45, autre 52 µmol/L, méthode enzymatique).
   // sd : écart-type de la population de validation (C : tableau S1 de Liu 2018) ; CRP : écart-type de ln(CRP) déduit
   // de 0,4 ± 1,0 mg/dL en loi log-normale (D). Influence = impact d'un écart-type, borné à 3 ans : l'écart habituel
-  // entre deux personnes. Elle classe les analyses (affichage, priorités du prochain bilan), sans entrer dans le calcul.
-  // Les 5 plus influentes portent 84 % de la somme des carrés (D).
+  // entre deux personnes. Poids = influence² ÷ somme des influences² des 9 analyses : part des écarts d'âge bio entre
+  // personnes dus à la prise de sang (variances additionnées, analyses supposées indépendantes, D). Le poids classe les
+  // analyses (formulaire, affichage, analyses à demander), sans entrer dans le calcul : les 3 premières portent 69 %,
+  // les 5 premières 84 % (D).
   BLOOD_VALID_DAYS: 365,        // une prise de sang compte 12 mois (D : rythme d'un bilan annuel)
   BLOOD_BOUNDS: [-3, 3],        // impact borné à ± 3 ans par marqueur (D, comme la VO2 max)
   // CRP au-delà de 10 mg/L : infection ou inflammation aiguë probable, non comptée (C : Pearson TA et al., AHA/CDC,
@@ -194,50 +196,55 @@ export const CONFIG = {
   BLOOD_SYSTEMS: {              // organes : classement du tableau 1 de Levine 2018 (C ; VGM et IDR y sont « Immune »)
     foie: 'Foie', reins: 'Reins', metabolisme: 'Métabolisme', inflammation: 'Inflammation', immunite: 'Immunité et sang',
   },
-  // Catalogue, dans l'ordre d'un compte rendu de laboratoire. range : saisie plausible (sinon erreur, le plus souvent
-  // d'unité) ; hint : conversion la plus fréquente ; text : clavier texte (valeurs « < 5 ») ; counted : marqueur de
-  // l'âge bio. Les autres analyses sont suivies sans compter.
+  // Les 9 analyses de l'âge bio, de la plus à la moins influente (l'app trie aussi par poids).
+  // range : saisie plausible, dans l'unité du modèle (sinon erreur) ; typical : valeurs habituelles, larges, dans l'unité
+  // du modèle, pour reconnaître l'unité d'une saisie (D) ; aka : autres noms sur un compte rendu ; tip : piège de saisie ;
+  // text : clavier texte (valeurs « < 1 »).
+  // units : unités d'un compte rendu, la première est celle du modèle ; k : valeur dans l'unité du modèle = valeur × k
+  // (C, masses molaires : glucose 180,16 g/mol, créatinine 113,12 g/mol) ; abs : lymphocytes en nombre, valeur × abs =
+  // G/L, ramenés en % des leucocytes du même compte rendu ; dp : décimales affichées au plus ; ex : valeur habituelle
+  // donnée en exemple (D : neutre arrondi ; lymphocytes en nombre : environ 30 % de 6,8 G/L).
   BLOOD: [
-    { id: 'hemoglobine', label: 'Hémoglobine', unit: 'g/dL', section: 'Hématologie', range: [5, 25] },
-    { id: 'vgm', label: 'VGM', full: 'volume globulaire moyen', unit: 'fL', section: 'Hématologie', range: [50, 150],
-      counted: { coef: 0.0268, neutral: 90.0, sd: 6.0, best: 80, system: 'immunite' } },
-    { id: 'idr', label: 'IDR', full: 'indice de distribution des globules rouges, ou RDW', unit: '%', section: 'Hématologie', range: [8, 35],
+    { id: 'idr', label: 'IDR', aka: 'Indice de distribution des globules rouges, RDW, IDR-CV · dans la NFS',
+      tip: "l'IDR-CV en %, pas l'IDR-SD en fL", range: [8, 35],
+      units: [{ u: '%', k: 1, dp: 1, ex: 12.7 }],
       counted: { coef: 0.3306, neutral: 12.7, sd: 1.1, best: 11.5, system: 'immunite' } },
-    { id: 'leucocytes', label: 'Leucocytes', unit: 'G/L', section: 'Hématologie', range: [0.5, 100],
-      counted: { coef: 0.0554, neutral: 6.8, sd: 2.4, best: 4, system: 'immunite' } },
-    { id: 'neutrophiles', label: 'Neutrophiles', full: 'polynucléaires neutrophiles', unit: 'G/L', section: 'Hématologie', range: [0, 60] },
-    { id: 'lymphocytes', label: 'Lymphocytes', full: 'en %, pas en G/L', unit: '%', section: 'Hématologie', range: [1, 99],
-      counted: { coef: -0.0120, neutral: 30.0, sd: 9.6, best: 40, system: 'immunite' } },
-    { id: 'plaquettes', label: 'Plaquettes', unit: 'G/L', section: 'Hématologie', range: [5, 1500] },
-    { id: 'glycemie', label: 'Glycémie à jeun', unit: 'mmol/L', section: 'Biochimie', range: [1.5, 40], hint: 'en g/L ? multiplie par 5,55',
+    { id: 'glycemie', label: 'Glycémie à jeun', aka: 'Glucose, glycémie', range: [1.5, 40], typical: [3, 15],
+      units: [{ u: 'mmol/L', k: 1, dp: 2, ex: 5.4 }, { u: 'g/L', k: 1 / 0.18016, dp: 2, ex: 0.97 }, { u: 'mg/dL', k: 1 / 18.016, dp: 0, ex: 97 }],
       counted: { coef: 0.1953, neutral: 5.4, sd: 1.5, best: 3.9, system: 'metabolisme' } },
-    { id: 'hba1c', label: 'HbA1c', full: 'hémoglobine glyquée', unit: '%', section: 'Biochimie', range: [3, 20] },
-    { id: 'creatinine', label: 'Créatinine', unit: 'µmol/L', section: 'Biochimie', range: [15, 2000], hint: 'en mg/L ? multiplie par 8,84',
+    { id: 'creatinine', label: 'Créatinine', aka: 'Créatininémie', tip: 'dans le sang, pas dans les urines', range: [15, 2000], typical: [35, 200],
+      units: [{ u: 'µmol/L', k: 1, dp: 0, ex: 75 }, { u: 'mg/L', k: 8.84, dp: 1, ex: 8.5 }, { u: 'mg/dL', k: 88.4, dp: 2, ex: 0.85 }],
       counted: { coef: 0.0095, neutral: 75.2, sd: 21.9, best: { male: 59, female: 45, other: 52 }, system: 'reins' } },
-    { id: 'dfg', label: 'DFG', full: 'débit de filtration glomérulaire, CKD-EPI', unit: 'mL/min/1,73 m²', section: 'Biochimie', range: [2, 200] },
-    { id: 'uree', label: 'Urée', unit: 'mmol/L', section: 'Biochimie', range: [0.5, 80], hint: 'en g/L ? multiplie par 16,6' },
-    { id: 'sodium', label: 'Sodium', unit: 'mmol/L', section: 'Biochimie', range: [100, 180] },
-    { id: 'potassium', label: 'Potassium', unit: 'mmol/L', section: 'Biochimie', range: [1.5, 9] },
-    { id: 'proteines', label: 'Protéines totales', unit: 'g/L', section: 'Biochimie', range: [30, 130] },
-    { id: 'albumine', label: 'Albumine', unit: 'g/L', section: 'Biochimie', range: [10, 70],
+    { id: 'vgm', label: 'VGM', aka: 'Volume globulaire moyen, MCV · dans la NFS', tip: '1 fL = 1 µm³ = 1 µ³', range: [50, 150],
+      units: [{ u: 'fL', k: 1, dp: 1, ex: 90 }],
+      counted: { coef: 0.0268, neutral: 90.0, sd: 6.0, best: 80, system: 'immunite' } },
+    { id: 'albumine', label: 'Albumine', aka: 'Albuminémie, albumine sérique', tip: 'dans le sang, pas dans les urines', range: [10, 70], typical: [25, 60],
+      units: [{ u: 'g/L', k: 1, dp: 1, ex: 43 }, { u: 'g/dL', k: 10, dp: 2, ex: 4.3 }],
       counted: { coef: -0.0336, neutral: 42.7, sd: 4.2, best: 50, system: 'foie' } },
-    { id: 'asat', label: 'ASAT', full: 'transaminases SGOT', unit: 'UI/L', section: 'Foie', range: [2, 10000] },
-    { id: 'alat', label: 'ALAT', full: 'transaminases SGPT', unit: 'UI/L', section: 'Foie', range: [2, 10000] },
-    { id: 'ggt', label: 'Gamma GT', unit: 'UI/L', section: 'Foie', range: [2, 10000] },
-    { id: 'pal', label: 'Phosphatases alcalines', unit: 'UI/L', section: 'Foie', range: [5, 5000],
-      counted: { coef: 0.00188, neutral: 69.4, sd: 28.0, best: 40, system: 'foie' } },
-    { id: 'bilirubine', label: 'Bilirubine totale', unit: 'µmol/L', section: 'Foie', range: [1, 800], hint: 'en mg/L ? multiplie par 1,71' },
-    { id: 'crp', label: 'CRP', full: 'protéine C réactive, ultrasensible si possible', unit: 'mg/L', section: 'Inflammation', range: [0, 500], text: true,
+    { id: 'crp', label: 'CRP', aka: 'Protéine C réactive, CRP ultrasensible, CRPus, hs-CRP', tip: 'une valeur « < 1 » se saisit telle quelle',
+      range: [0, 500], text: true,
+      units: [{ u: 'mg/L', k: 1, dp: 2, ex: 1.5 }, { u: 'mg/dL', k: 10, dp: 3, ex: 0.15 }],
       counted: { coef: 0.0954, neutral: 1.5, sd: 1.41, best: 0.3, log: true, max: 10, system: 'inflammation' } },
-    { id: 'ldl', label: 'LDL-cholestérol', unit: 'g/L', section: 'Lipides', range: [0.1, 6], hint: 'en mmol/L ? multiplie par 0,387' },
-    { id: 'hdl', label: 'HDL-cholestérol', unit: 'g/L', section: 'Lipides', range: [0.1, 3], hint: 'en mmol/L ? multiplie par 0,387' },
-    { id: 'triglycerides', label: 'Triglycérides', unit: 'g/L', section: 'Lipides', range: [0.1, 30], hint: 'en mmol/L ? multiplie par 0,885' },
-    { id: 'apob', label: 'Apolipoprotéine B', unit: 'g/L', section: 'Lipides', range: [0.1, 4] },
-    { id: 'ferritine', label: 'Ferritine', unit: 'µg/L', section: 'Autres', range: [1, 10000] },
-    { id: 'tsh', label: 'TSH', unit: 'mUI/L', section: 'Autres', range: [0.001, 150] },
-    { id: 'vitd', label: 'Vitamine D', full: '25-OH', unit: 'ng/mL', section: 'Autres', range: [2, 250], hint: 'en nmol/L ? divise par 2,5' },
-    { id: 'psa', label: 'PSA total', unit: 'ng/mL', section: 'Autres', range: [0, 5000], text: true },
+    { id: 'leucocytes', label: 'Leucocytes', aka: 'Globules blancs, GB · dans la NFS', tip: '10⁹/L, 10³/mm³ et 10³/µL = G/L ; /µL = /mm³',
+      range: [0.5, 100], typical: [2, 25],
+      units: [{ u: 'G/L', k: 1, dp: 2, ex: 6.8 }, { u: '/mm³', k: 0.001, dp: 0, ex: 6800 }],
+      counted: { coef: 0.0554, neutral: 6.8, sd: 2.4, best: 4, system: 'immunite' } },
+    { id: 'lymphocytes', label: 'Lymphocytes', aka: 'Formule leucocytaire · dans la NFS',
+      tip: "en nombre, l'app calcule le % avec les leucocytes", range: [1, 99], typical: [5, 70],
+      units: [{ u: '%', k: 1, dp: 1, ex: 30 }, { u: 'G/L', abs: 1, dp: 2, ex: 2 }, { u: '/mm³', abs: 0.001, dp: 0, ex: 2000 }],
+      counted: { coef: -0.0120, neutral: 30.0, sd: 9.6, best: 40, system: 'immunite' } },
+    { id: 'pal', label: 'Phosphatases alcalines', aka: 'PAL, ALP', tip: 'UI/L = U/L', range: [5, 5000],
+      units: [{ u: 'UI/L', k: 1, dp: 0, ex: 69 }],
+      counted: { coef: 0.00188, neutral: 69.4, sd: 28.0, best: 40, system: 'foie' } },
   ],
+  // Analyses suivies sans compter jusqu'à Âge bio 2.3.1, retirées depuis : les valeurs déjà saisies restent telles
+  // quelles dans la mémoire de l'app et la sauvegarde, sans s'afficher. id : valeurs plausibles, dans l'unité d'alors.
+  BLOOD_KEPT: {
+    hemoglobine: [5, 25], neutrophiles: [0, 60], plaquettes: [5, 1500], hba1c: [3, 20], dfg: [2, 200], uree: [0.5, 80],
+    sodium: [100, 180], potassium: [1.5, 9], proteines: [30, 130], asat: [2, 10000], alat: [2, 10000], ggt: [2, 10000],
+    bilirubine: [1, 800], ldl: [0.1, 6], hdl: [0.1, 3], triglycerides: [0.1, 30], apob: [0.1, 4], ferritine: [1, 10000],
+    tsh: [0.001, 150], vitd: [2, 250], psa: [0, 5000],
+  },
 
   // ---------- Statut, précision, leviers ----------
   STATUS_EPS: 0.05,             // 'good' si Δ ≤ −0,05 an, 'bad' si Δ ≥ 0,05 an
@@ -262,6 +269,7 @@ const DAY_MS = 86400000;
 const STRENGTH = new Set(Object.keys(CONFIG.STRENGTH_KINDS).map(Number));
 const BLOOD_BY_ID = new Map(CONFIG.BLOOD.map(b => [b.id, b]));
 export const BLOOD_COUNTED = CONFIG.BLOOD.filter(b => b.counted).map(b => b.id);
+const BLOOD_KEPT = new Map(Object.entries(CONFIG.BLOOD_KEPT));
 const byKey = (a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
 
 // ================= Outils =================
@@ -722,11 +730,63 @@ export function jurcaLevel({ aerobic, strength = 0, steps = 0 }) {
 // ================= Prise de sang =================
 
 export const bloodMarker = id => BLOOD_BY_ID.get(id) ?? null;
+// Unité du modèle d'une analyse (la première de units).
+export const refUnit = id => BLOOD_BY_ID.get(id)?.units[0].u ?? '';
 
 // Influence d'une analyse comptée (années) : impact d'un écart-type de la population, borné à 3 ans. Classement seulement.
 export function bloodInfluence(id) {
   const c = BLOOD_BY_ID.get(id)?.counted;
   return c ? Math.min(G * Math.abs(c.coef) * c.sd, CONFIG.BLOOD_BOUNDS[1]) : 0;
+}
+
+// Poids de chaque analyse : influence² ÷ somme des influences², part des écarts d'âge bio entre personnes dus à la
+// prise de sang. Map id → part de 0 à 1, du plus au moins influent. Classement et affichage seulement.
+export function bloodWeights() {
+  const sq = BLOOD_COUNTED.map(id => [id, bloodInfluence(id) ** 2]).sort((a, b) => b[1] - a[1]);
+  const total = sq.reduce((a, [, x]) => a + x, 0);
+  return new Map(sq.map(([id, x]) => [id, total > 0 ? x / total : 0]));
+}
+
+// ---------- Unités ----------
+const tidy = x => Number(x.toPrecision(6));   // 6 800 × 0,001 = 6,8 et non 6,800000000000001
+const unitDef = (id, u) => BLOOD_BY_ID.get(id)?.units.find(x => x.u === u) ?? null;
+
+// Valeur v dans l'unité u → unité du modèle. Lymphocytes en nombre : % des leucocytes ctx.leucocytes (G/L, même
+// compte rendu). null : unité inconnue, ou % incalculable sans leucocytes.
+export function labToRef(id, v, u, ctx = {}) {
+  const x = unitDef(id, u);
+  if (!x || !Number.isFinite(v)) return null;
+  if (x.abs === undefined) return tidy(v * x.k);
+  const l = ctx.leucocytes;
+  return Number.isFinite(l) && l > 0 ? tidy((v * x.abs * 100) / l) : null;
+}
+// Inverse : valeur dans l'unité du modèle → unité u.
+export function labFromRef(id, v, u, ctx = {}) {
+  const x = unitDef(id, u);
+  if (!x || !Number.isFinite(v)) return null;
+  if (x.abs === undefined) return tidy(v / x.k);
+  const l = ctx.leucocytes;
+  return Number.isFinite(l) && l > 0 ? tidy((v * l) / 100 / x.abs) : null;
+}
+
+// Unité probable d'une saisie faite dans l'unité u : si la valeur est inhabituelle dans u (typical) et habituelle dans
+// une seule autre unité, cette autre ; sinon, si elle est hors des valeurs plausibles dans u (range) et plausible dans
+// une seule autre, cette autre ; sinon null (u convient, ou rien ne permet de trancher).
+export function guessLabUnit(id, raw, u, ctx = {}) {
+  const b = BLOOD_BY_ID.get(id);
+  const p = parseLab(raw);
+  if (!b || !p || b.units.length < 2 || !unitDef(id, u)) return null;
+  const inside = ([lo, hi], unit) => {
+    const v = labToRef(id, p.v, unit, ctx);
+    return v !== null && v >= lo && v <= hi;
+  };
+  for (const zone of [b.typical, b.range]) {
+    if (!zone) continue;
+    if (inside(zone, u)) return null;
+    const others = b.units.filter(x => x.u !== u && inside(zone, x.u));
+    if (others.length === 1) return others[0].u;
+  }
+  return null;
 }
 
 // Valeur de laboratoire : nombre, ou texte « 4,2 », « < 5 », « >90 ». → { v, q } (q : '<', '>' ou '') ou null.
@@ -738,19 +798,30 @@ export function parseLab(raw) {
   return m ? { v: Number(m[2]), q: m[1] ?? '' } : null;
 }
 
-// Saisie d'une analyse : { value } (nombre, ou texte « <5 » pour une valeur sous un seuil) ou { error } (phrase).
-export function checkLab(id, raw) {
+// Saisie d'une analyse dans l'unité u (par défaut celle du modèle) : { value } dans l'unité du modèle (nombre, ou texte
+// « <5 » pour une valeur sous un seuil) ou { error } (phrase). ctx.leucocytes : lymphocytes saisis en nombre.
+export function checkLab(id, raw, u = null, ctx = {}) {
   const b = BLOOD_BY_ID.get(id);
   if (!b) return { error: 'Analyse inconnue.' };
+  const unit = u ?? refUnit(id);
+  const x = unitDef(id, unit);
+  if (!x) return { error: 'Unité inconnue.' };
   const p = parseLab(raw);
   if (!p) return { error: 'Nombre attendu, par exemple 4,2 ou < 5.' };
+  const v = labToRef(id, p.v, unit, ctx);
+  if (v === null) return { error: 'Pour calculer le %, saisis aussi les leucocytes de ce compte rendu.' };
   const [lo, hi] = b.range;
-  if (p.v < lo || p.v > hi) return { error: `Hors des valeurs plausibles (${fmt(lo)} à ${fmt(hi)} ${b.unit}) : ${b.hint ?? "vérifie l'unité"}.` };
-  return { value: p.q ? `${p.q}${p.v}` : p.v };
+  if (v < lo || v > hi) {
+    const alt = guessLabUnit(id, raw, unit, ctx);
+    const span = x.abs === undefined ? `${fmt(tidy(lo / x.k))} à ${fmt(tidy(hi / x.k))} ${unit}` : `${fmt(lo)} à ${fmt(hi)} % des leucocytes`;
+    return { error: `Hors des valeurs plausibles (${span}) : ${alt ? `valeur en ${alt} ?` : "vérifie l'unité."}` };
+  }
+  return { value: p.q ? `${p.q}${v}` : v };
 }
 
-// Prises de sang lues (mémoire de l'app, fichier de sauvegarde) : dates AAAA-MM-JJ, analyses connues et plausibles
-// seulement, une par date (la dernière lue l'emporte), de la plus récente à la plus ancienne.
+// Prises de sang lues (mémoire de l'app, fichier de sauvegarde) : dates AAAA-MM-JJ, une par date (la dernière lue
+// l'emporte), de la plus récente à la plus ancienne. Analyses de l'âge bio plausibles, dans l'unité du modèle ;
+// analyses retirées (BLOOD_KEPT) gardées telles quelles si plausibles ; le reste est écarté.
 export function cleanBilans(list) {
   if (!Array.isArray(list)) return [];
   const byDate = new Map();
@@ -758,8 +829,14 @@ export function cleanBilans(list) {
     if (!b || typeof b.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(b.date) || !b.valeurs || typeof b.valeurs !== 'object') continue;
     const valeurs = {};
     for (const [id, raw] of Object.entries(b.valeurs)) {
-      const r = BLOOD_BY_ID.has(id) ? checkLab(id, typeof raw === 'number' ? String(raw) : raw) : {};
-      if (r.value !== undefined) valeurs[id] = r.value;
+      if (BLOOD_BY_ID.has(id)) {
+        const r = checkLab(id, typeof raw === 'number' ? String(raw) : raw);
+        if (r.value !== undefined) valeurs[id] = r.value;
+      } else if (BLOOD_KEPT.has(id)) {
+        const p = parseLab(raw);
+        const [lo, hi] = BLOOD_KEPT.get(id);
+        if (p && p.v >= lo && p.v <= hi) valeurs[id] = p.q ? `${p.q}${p.v}` : p.v;
+      }
     }
     if (Object.keys(valeurs).length) byDate.set(b.date, { date: b.date, valeurs });
   }
@@ -783,7 +860,7 @@ export function bloodImpact(id, raw, gender = null) {
   if (!c) return { delta: 0, counted: false, reason: 'suivie, sans effet sur l\'âge bio' };
   if (!p) return { delta: 0, counted: false, reason: 'valeur illisible' };
   if (c.max !== undefined && (p.v > c.max || (p.q === '>' && p.v >= c.max)) && p.q !== '<') {
-    return { delta: 0, counted: false, reason: `au-delà de ${fmt(c.max)} ${BLOOD_BY_ID.get(id).unit} : infection ou inflammation probable, à refaire au calme` };
+    return { delta: 0, counted: false, reason: `au-delà de ${fmt(c.max)} ${refUnit(id)} : infection ou inflammation probable, à refaire au calme` };
   }
   const d = bloodRaw(c, p.v, gender);
   if (!p.q) return { delta: d, counted: true, reason: null };
@@ -1319,7 +1396,7 @@ export function analyze(base, opts = {}) {
 
 // ================= Export Gadgetbridge : tables et codes =================
 
-export const APP_VERSION = '2.3.1';
+export const APP_VERSION = '2.4.0';
 
 // Tables lues (schéma Gadgetbridge 160, GBDaoGenerator.java).
 const T_ACT = 'XIAOMI_ACTIVITY_SAMPLE';
@@ -2347,13 +2424,10 @@ export function demoBilans(todayKey, scenario = 'complet') {
   if ((scenario || 'complet') !== 'complet') return [];
   return cleanBilans([
     { date: addDays(todayKey, -40), valeurs: {
-      hemoglobine: 15.1, vgm: 91, idr: 12.9, leucocytes: 5.9, neutrophiles: 3.2, lymphocytes: 32, plaquettes: 241,
-      glycemie: 5.1, hba1c: 5.3, creatinine: 84, dfg: 98, albumine: 45, asat: 22, alat: 24, ggt: 21, pal: 64,
-      crp: 0.9, ldl: 1.12, hdl: 0.58, triglycerides: 0.84, ferritine: 118, vitd: 31,
+      idr: 12.9, glycemie: 5.1, creatinine: 84, vgm: 91, albumine: 45, crp: 0.9, leucocytes: 5.9, lymphocytes: 32, pal: 64,
     } },
     { date: addDays(todayKey, -330), valeurs: {
-      hemoglobine: 14.8, vgm: 91, leucocytes: 6.6, lymphocytes: 29, plaquettes: 236, creatinine: 86, dfg: 94,
-      asat: 27, alat: 31, ggt: 26, pal: 71, crp: '<4', ldl: 1.34, hdl: 0.52, triglycerides: 1.12, ferritine: 96,
+      creatinine: 86, vgm: 91, crp: '<4', leucocytes: 6.6, lymphocytes: 29, pal: 71,
     } },
   ]);
 }

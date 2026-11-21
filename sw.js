@@ -1,6 +1,6 @@
 // Âge bio — service worker : l'app s'ouvre hors ligne après la première visite (cache d'abord).
 // À chaque livraison : incrémenter N dans CACHE et APP_VERSION dans calc.js.
-const CACHE = 'agebio-v8';
+const CACHE = 'agebio-v9';
 const FILES = [
   './', 'index.html', 'style.css', 'app.js', 'calc.js',
   'sql-wasm.js', 'sql-wasm.wasm', 'manifest.webmanifest',
