@@ -20,7 +20,7 @@
       <h1 id="sync-title" class="visually-hidden" tabindex="-1">Synchro</h1>
       <div class="sync-stage">
         <div id="sync-ring" class="sync-ring" aria-hidden="true"></div>
-        <p id="sync-lede" class="sync-lede">Ton âge bio, calculé sur place.<br>Rien n'est envoyé ni conservé.</p>
+        <p id="sync-lede" class="sync-lede">Ton âge bio, calculé sur place.<br>Rien n'est envoyé.</p>
         <ol id="sync-steps" class="sync-steps" hidden></ol>
         <p id="sync-status" class="sync-status" role="status" aria-live="polite">Démarrage… Si ce message reste affiché, recharge la page.</p>
         <div id="sync-actions" class="sync-actions">
@@ -38,6 +38,8 @@
     <section id="v-indicateur" class="view view-detail" data-screen="indicateur" hidden></section>
     <section id="v-sommeil" class="view view-detail" data-screen="sommeil" hidden></section>
     <section id="v-tendance" class="view view-detail" data-screen="tendance" hidden></section>
+    <section id="v-sang" class="view view-detail" data-screen="sang" hidden></section>
+    <section id="v-bilan" class="view view-detail" data-screen="bilan" hidden></section>
 
     <!-- Méthode : texte fixe ; barèmes générés depuis CONFIG (calc.js) par app.js. -->
     <section id="v-methode" class="view view-detail" data-screen="methode" aria-labelledby="method-title" hidden>
@@ -53,7 +55,7 @@
         <p class="notice">Estimation personnelle fondée sur la littérature scientifique. Pas un avis médical.</p>
 
         <h2>Âge bio</h2>
-        <p>Âge bio = âge civil + somme des impacts de 8 indicateurs mesurés sur 6 mois (182 jours). L'impact d'un indicateur vaut 10 × ln(RR) années, où RR est le risque relatif de mortalité toutes causes face à sa valeur neutre : chaque année d'âge augmente ce risque d'environ 10 %. Les seuils neutres, la conversion et la cadence suivent la méthode publiée d'un bracelet du commerce (livre blanc révisé le 4/9/2025).</p>
+        <p>Âge bio = âge civil + somme des impacts de 8 indicateurs mesurés sur 6 mois (182 jours), et de 9 marqueurs de ta dernière prise de sang si tu l'as saisie. L'impact d'un indicateur vaut 10 × ln(RR) années, où RR est le risque relatif de mortalité toutes causes face à sa valeur neutre : chaque année d'âge augmente ce risque d'environ 10 %. Les seuils neutres, la conversion et la cadence suivent la méthode publiée d'un bracelet du commerce (livre blanc révisé le 4/9/2025).</p>
 
         <h2>Cadence</h2>
         <p>La valeur officielle se calcule chaque dimanche, après la nuit du samedi : jours du dimanche − 182 à la veille, nuits jusqu'au dimanche. Elle se débloque avec au moins 21 nuits valides sur les 31 derniers jours ; en dessous, la dernière valeur reste affichée, en pause. Tant que la fenêtre compte moins de 90 jours valides, l'âge bio est en calibrage. L'aperçu du jour refait le calcul avec les données jusqu'à aujourd'hui.</p>
@@ -77,6 +79,15 @@
         <p>Leviers : années gagnées si un comportement progresse d'un pas réaliste (30 min de sommeil par nuit, 10 points de régularité, 30 min d'activité modérée ou 10 min d'activité vigoureuse par semaine, 20 min de renforcement par semaine, 1 000 pas par jour), avec les mêmes barèmes. Ce sont des estimations, pas une promesse.</p>
         <p>Précision : l'incertitude de chaque indicateur (variabilité des mesures ÷ √n) est convertie en années par la pente de son barème ; l'intervalle à 95 % vaut âge bio ± 1,96 × la racine de la somme des carrés.</p>
 
+        <h2>Prise de sang</h2>
+        <p>Les valeurs saisies restent dans la mémoire de l'app, sur ce téléphone : jamais envoyées, jamais dans le Diagnostic. Une prise de sang compte 12 mois ; pour chaque marqueur, la valeur la plus récente.</p>
+        <p>9 analyses courantes comptent, avec les poids de PhenoAge (Levine 2018) : albumine, créatinine, glycémie à jeun, CRP, lymphocytes (%), VGM, IDR, phosphatases alcalines, leucocytes. Chaque poids est le logarithme du risque de mortalité toutes causes par unité, estimé avec les huit autres dans un même modèle : un marqueur ne recompte pas ce qu'un autre compte déjà. Impact = 10 × poids × (valeur − neutre), comme les indicateurs du bracelet ; CRP : 10 × poids × ln(CRP ÷ neutre). Neutre : moyenne de la population de validation (NHANES IV, 11 432 adultes, Liu 2018) ; CRP : moyenne géométrique, environ 1,5 mg/L.</p>
+        <p>Garde-fous : au-delà de la limite usuelle de l'adulte côté favorable, plus de gain (une valeur anormalement basse n'est pas un progrès) ; impact borné à ± 3 ans par marqueur ; CRP au-delà de 10 mg/L non comptée (infection ou inflammation probable : refaire le dosage au calme) ; valeur « &lt; seuil » : le seuil, sans gain du côté inconnu. Les autres analyses sont suivies sans compter.</p>
+        <p>Âge par organe : âge civil + impacts des marqueurs de l'organe, selon le classement de l'article (foie : albumine, phosphatases alcalines ; reins : créatinine ; métabolisme : glycémie ; inflammation : CRP ; immunité et sang : lymphocytes, VGM, IDR, leucocytes). Grossier : une à quatre analyses par organe.</p>
+        <p>Limites : le recouvrement avec les indicateurs du bracelet (FC de repos, activité) n'est pas corrigé ; l'IDR varie selon l'automate du laboratoire (NHANES : Beckman Coulter) ; la prise de sang n'entre ni dans la fiabilité ni dans l'intervalle de précision ; elle déplace l'âge bio, pas le rythme (même valeur sur 30 et 182 jours).</p>
+        <p>Influence d'une analyse : impact sur l'âge bio d'un écart-type de la population de validation, c'est-à-dire l'écart habituel entre deux personnes, borné à 3 ans. Elle classe les analyses (ordre d'affichage, priorités du prochain bilan) sans entrer dans le calcul. Les cinq plus influentes (IDR, glycémie à jeun, créatinine, VGM, albumine) portent environ 85 % des écarts dus à la prise de sang ; les quatre autres restent comptées, car elles figurent déjà dans un bilan courant.</p>
+        <ul id="method-blood" class="scales"></ul>
+
         <h2>Sommeil</h2>
         <p>La nuit du jour J regroupe les sessions qui commencent entre la veille 18 h et 6 h, plus celles qui commencent moins de 60 minutes après la fin de la précédente ; les autres (siestes) sont ignorées. Le bracelet ne transmet que le début et la fin des sessions (ni stades ni éveils) : la durée d'une nuit est celle de ses sessions, éveils compris.</p>
         <p>Performance = durée ÷ 8 h. Repères Faible · Suffisant · Optimal : performance et régularité &lt; 70 % · 70 à 85 % · ≥ 85 %.</p>
@@ -95,6 +106,9 @@
           <li>Karvonen MJ et al. The effects of training on heart rate: a longitudinal study. Ann Med Exp Biol Fenn 1957;35(3):307–315.</li>
           <li>Tanaka H et al. Age-predicted maximal heart rate revisited. J Am Coll Cardiol 2001;37(1):153–156.</li>
           <li>OMS. Lignes directrices sur l'activité physique et la sédentarité, 2020.</li>
+          <li>Levine ME et al. An epigenetic biomarker of aging for lifespan and healthspan. Aging (Albany NY) 2018;10(4):573–591.</li>
+          <li>Liu Z et al. A new aging measure captures morbidity and mortality risk across diverse subpopulations from NHANES IV: a cohort study. PLoS Med 2018;15(12):e1002718 ; correctif PLoS Med 2019;16(2):e1002760.</li>
+          <li>Pearson TA et al. Markers of inflammation and cardiovascular disease: application to clinical and public health practice. Circulation 2003;107(3):499–511.</li>
         </ul>
         <p id="method-version" class="note"></p>
       </div>
@@ -146,6 +160,7 @@
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <p id="live" class="visually-hidden" aria-live="polite"></p>
   <input id="file" type="file" hidden>
+  <input id="file-blood" type="file" accept=".json,application/json" hidden>
   <noscript><p class="noscript">Âge bio a besoin de JavaScript pour lire l'export.</p></noscript>
   <script src="sql-wasm.js"></script>
   <script type="module" src="app.js"></script>

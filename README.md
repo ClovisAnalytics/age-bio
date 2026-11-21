@@ -1,8 +1,8 @@
 # Âge bio
 
-Âge biologique, rythme de vieillissement et sommeil, calculés **dans le navigateur du téléphone** à partir d'un bracelet Xiaomi Smart Band 7 Pro synchronisé avec [Gadgetbridge](https://gadgetbridge.org). Sans compte, sans serveur, sans abonnement.
+Âge biologique, rythme de vieillissement et sommeil, calculés **dans le navigateur du téléphone** à partir d'un bracelet Xiaomi Smart Band 7 Pro synchronisé avec [Gadgetbridge](https://gadgetbridge.org), et des prises de sang saisies dans l'app. Sans compte, sans serveur, sans abonnement.
 
-Inspiration : WHOOP Age et Pace of Aging. Formule propre au projet, fondée sur des méta-analyses de mortalité toutes causes : section *Méthode* de l'app, constantes et sources dans `CONFIG` (`calc.js`).
+Inspiration : WHOOP Age et Pace of Aging. Formule propre au projet, fondée sur des méta-analyses de mortalité toutes causes ; prise de sang : poids de PhenoAge (Levine 2018). Section *Méthode* de l'app, constantes et sources dans `CONFIG` (`calc.js`).
 
 > Estimation personnelle fondée sur la littérature scientifique. Pas un avis médical.
 
@@ -10,9 +10,10 @@ Inspiration : WHOOP Age et Pace of Aging. Formule propre au projet, fondée sur 
 
 - L'export choisi est lu en mémoire, analysé puis libéré : rien n'est conservé, rien n'est envoyé.
 - Le profil (naissance, sexe, taille, poids) vient de Gadgetbridge, via l'export : aucune saisie, rien dans le stockage du navigateur.
+- Les **prises de sang** saisies restent dans la mémoire de l'app, sur le téléphone (stockage local du navigateur) : jamais envoyées, jamais dans le Diagnostic. Effacer les données de Chrome les efface : *Prises de sang → Sauvegarder dans un fichier* (Téléchargements du téléphone). Tous les sites GitHub Pages d'un même compte partagent ce stockage : n'y publier aucun code tiers.
 - Le **Diagnostic** ne contient que la structure de l'export et des comptages : c'est le seul texte à transmettre pour la mise au point.
 - Aucune requête hors des fichiers du site (CSP de `index.html`) : ni analytics, ni police web, ni CDN.
-- Ne jamais copier un export (`*.db`, `*.zip`) dans ce dossier.
+- Ne jamais copier un export (`*.db`, `*.zip`) ni une sauvegarde de prises de sang (`*.json`) dans ce dossier (`.gitignore` les écarte).
 
 ## Utilisation
 
@@ -20,6 +21,7 @@ Inspiration : WHOOP Age et Pace of Aging. Formule propre au projet, fondée sur 
 2. Le soir, avant minuit : synchroniser dans Gadgetbridge (le bracelet ne transmet que le jour en cours).
 3. Gadgetbridge : Paramètres → *Automations* → **Run AutoExport now** (ou attendre l'export automatique).
 4. Dans l'app : **Synchroniser** → *Documents* → le fichier de l'export.
+5. Après une prise de sang : *Plus* → **Prises de sang** → *Ajouter*. Pour l'âge bio, demander au laboratoire : NFS avec IDR, glycémie à jeun, créatinine, CRP (ultrasensible si possible), albumine, phosphatases alcalines.
 
 L'âge bio s'affiche dès la première nuit ou journée valide, en valeur provisoire, avec un score de fiabilité qui grandit avec les données (100 % à 90 jours). La valeur officielle se calcule chaque dimanche et prend le relais avec 21 nuits valides sur les 31 derniers jours. Démo : `index.html?demo` (ou `?demo=nouveau`, `?demo=pause`).
 
@@ -41,8 +43,8 @@ L'âge bio s'affiche dès la première nuit ou journée valide, en valeur provis
 |---|---|
 | `index.html` | page, CSP, texte de la méthode |
 | `style.css` | styles, thèmes sombre et clair |
-| `app.js` | interface : écrans, navigation, affichage |
-| `calc.js` | moteur : lecture de l'export, Diagnostic, profil, calcul (`CONFIG`), base de démo |
+| `app.js` | interface : écrans, navigation, affichage, saisie et sauvegarde des prises de sang |
+| `calc.js` | moteur : lecture de l'export, Diagnostic, profil, calcul (`CONFIG`), prises de sang, base de démo |
 | `sql-wasm.js`, `sql-wasm.wasm` | [sql.js](https://github.com/sql-js/sql.js) v1.15.2, release officielle |
 | `sw.js`, `manifest.webmanifest` | installation et usage hors ligne |
 

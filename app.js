@@ -1,7 +1,8 @@
 // Âge bio — interface (point d'entrée du module) : écrans, navigation par hash, composants SVG dessinés ici,
 // animations sobres. Les données viennent de calc.js (lecture de l'export, Diagnostic, profil, calcul) :
-// ce fichier met en forme, il ne calcule rien de santé. Rien n'est stocké (ni localStorage ni
-// IndexedDB). Le profil ne quitte pas l'écran (bloc replié de « Plus ») et n'entre jamais dans le Diagnostic.
+// ce fichier met en forme, il ne calcule rien de santé. L'export n'est jamais conservé. Seules les prises de sang
+// saisies sont gardées, dans la mémoire de l'app sur ce téléphone (localStorage, jamais envoyées ; démo : en mémoire).
+// Le profil et les prises de sang ne quittent pas l'écran et n'entrent jamais dans le Diagnostic.
 
 import {
   APP_VERSION, makeClock, openExport, readExport, diagnose, calcDiagnostic, describeProfile, UserError,
@@ -155,6 +156,9 @@ const ICON = {
   spark: 'M12 4v4M12 16v4M4 12h4M16 12h4M6.6 6.6l2.2 2.2M15.2 15.2l2.2 2.2M6.6 17.4l2.2-2.2M15.2 8.8l2.2-2.2',
   user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4.5 20.5a7.5 7.5 0 0 1 15 0',
   heart: 'M12 20s-7.5-4.6-7.5-10A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7.5 3c0 5.4-7.5 10-7.5 10z',
+  drop: 'M12 3.5c3.2 4.2 6 7.4 6 10.6a6 6 0 0 1-12 0c0-3.2 2.8-6.4 6-10.6z',
+  plus: 'M12 5v14M5 12h14',
+  download: 'M12 4v11M7.5 10.5 12 15l4.5-4.5M5 14v5.5h14V14',
   bolt: 'M13 3 5.5 13.5H12L11 21l7.5-10.5H12z',
   dumbbell: 'M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11',
   steps: 'M8.6 3.5c1.7 0 2.7 1.9 2.7 4.4 0 2.2-.9 3.6-2.4 3.6S6.2 10 6.2 7.9c0-2.5.7-4.4 2.4-4.4zM6.6 14h4.4l-.4 2.3a2.2 2.2 0 0 1-4.3-.1zM15.5 8.5c1.7 0 2.3 1.9 2.3 4.4 0 2.1-1.1 3.6-2.6 3.6s-2.4-1.4-2.4-3.6c0-2.5 1-4.4 2.7-4.4zM13 19h4.4l-.2 1.3a2.2 2.2 0 0 1-4.3.1z',
@@ -221,7 +225,29 @@ const IND = {
   },
 };
 const valText = (id, v) => IND[id].fmt(v).filter(Boolean).join(NBSP);
-const GROUP_NAME = { sleep: 'Sommeil', activity: 'Activité', fitness: 'Forme' };
+const GROUP_NAME = { sleep: 'Sommeil', activity: 'Activité', fitness: 'Forme', blood: 'Prise de sang' };
+
+// Marqueurs sanguins comptés (CONFIG.BLOOD de calc.js), décrits comme les indicateurs pour réutiliser barViz.
+// BLOOD_VIEW : axe de la barre, affichage seulement.
+const BLOOD_VIEW = { vgm: [75, 105], idr: [11, 16], leucocytes: [3, 12], lymphocytes: [10, 50], glycemie: [3.5, 8], creatinine: [40, 130], albumine: [30, 55], pal: [30, 160], crp: [0, 10] };
+const labFmt = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 });
+// Valeur de laboratoire telle que saisie : « 4,2 », « < 5 ».
+const labText = raw => {
+  const p = calc.parseLab(raw);
+  return p ? `${p.q ? `${p.q}${NBSP}` : ''}${labFmt.format(p.v)}` : '';
+};
+// Nom dans une phrase : « glycémie à jeun », sigles inchangés (« IDR »).
+const inSentence = name => (/^[A-Z0-9]+$/.test(name) ? name : name.charAt(0).toLowerCase() + name.slice(1));
+for (const b of calc.CONFIG.BLOOD) {
+  if (!b.counted) continue;
+  const [lo, hi] = BLOOD_VIEW[b.id] ?? [0, 100];
+  IND[b.id] = {
+    name: b.label, short: inSentence(b.label), group: 'blood', icon: 'drop', range: [lo, hi], ends: [labFmt.format(lo), labFmt.format(hi)],
+    fmt: v => [labFmt.format(v), b.unit], x: x => `${labFmt.format(x)}${NBSP}${b.unit}`, src: 'Levine 2018 ; Liu 2018', unit: b.unit,
+  };
+}
+// « 12 mars 2026 »
+const dayMonthYear = key => `${dayMonth(key)} ${key.slice(0, 4)}`;
 
 // ================= Pont vers le moteur =================
 
@@ -263,6 +289,46 @@ function interp(points, x) {
 }
 const statusOf = (present, d) => (!present ? 'absent' : d <= -0.05 ? 'good' : d >= 0.05 ? 'bad' : 'neutral');
 const impactCls = d => (round1(d) > 0 ? 'is-bad' : round1(d) < 0 ? 'is-good' : 'is-zero');
+
+// ================= Prises de sang : mémoire de l'app, sur ce téléphone =================
+
+// Stockage local du navigateur (origine du site) : seules les prises de sang y sont gardées, jamais envoyées.
+// Démo : prises de sang fictives, en mémoire seulement (le stockage n'est ni lu ni écrit).
+const BLOOD_KEY = 'agebio.prises-de-sang';
+const blood = { list: [], demo: false };
+function bloodLoad() {
+  if (DEMO !== null) {
+    blood.demo = true;
+    blood.list = calc.demoBilans(clock.dayKey(Date.now()), DEMO);
+    return;
+  }
+  try {
+    const raw = localStorage.getItem(BLOOD_KEY);
+    blood.list = raw ? calc.cleanBilans(JSON.parse(raw)?.bilans) : [];
+  } catch {
+    blood.list = [];
+  }
+}
+function bloodSave() {
+  if (blood.demo) return true;
+  try {
+    localStorage.setItem(BLOOD_KEY, JSON.stringify({ v: 1, bilans: blood.list }));
+    navigator.storage?.persist?.().catch(() => {});   // demande au navigateur de ne pas l'effacer de lui-même
+    return true;
+  } catch {
+    return false;
+  }
+}
+// Après une saisie : âge bio recalculé avec les prises de sang, écrans principaux à jour.
+function bloodChanged() {
+  if (!state.data) return;
+  state.data.calc = { ...state.data.calc, bilans: blood.list };
+  state.data.result = calc.analyze(state.data.base, state.data.calc);
+  renderToday();
+  renderAge();
+  renderPlus();
+  renderMethod();
+}
 
 // ================= Vocabulaire =================
 
@@ -357,7 +423,7 @@ function ageModel() {
     return {
       kind: 'value', provisional: true, official: false, recent: Boolean(p.pace), off: null, curve: [], idx: 0, offIdx: 0, prev: null,
       key: p.key, bio: p.bio, gap: p.gap, civil: p.civil, pace: p.pace?.value ?? null, prevPace: null,
-      calibrating: true, indicators: p.indicators ?? [], reliability: p.reliability ?? null,
+      calibrating: true, indicators: p.indicators ?? [], reliability: p.reliability ?? null, blood: p.blood ?? null,
       ageState: ageStateOf(p.gap), paceState: paceStateOf(p.pace?.value), paused: false,
     };
   }
@@ -372,11 +438,12 @@ function ageModel() {
       key: off.key, bio: off.bio, gap: off.gap, civil: off.civil, pace: off.pace?.value,
       prevPace: finite(off.pace?.prev) ? off.pace.prev : finite(prev?.pace) ? prev.pace : null,
       calibrating: Boolean(off.calibrating), indicators: off.indicators ?? [], reliability: off.reliability ?? null,
+      blood: off.blood ?? null,
     }
     : {
       key: pt.key, bio: pt.bio, gap: finite(pt.gap) ? pt.gap : pt.bio - pt.civil, civil: pt.civil, pace: pt.pace,
       prevPace: finite(prev?.pace) ? prev.pace : null, calibrating: Boolean(pt.calibrating), indicators: pointIndicators(pt, off),
-      reliability: finite(pt.reliability) ? { score: pt.reliability } : null,
+      reliability: finite(pt.reliability) ? { score: pt.reliability } : null, blood: pt.blood ?? null,
     };
   return {
     kind: 'value', official: isOff, off, curve, idx, offIdx, prev, ...base,
@@ -594,7 +661,7 @@ function barViz(ind, ctx, { open = false, cap = 'Moy. 6 mois' } = {}) {
   const segs = Array.from({ length: 10 }, (_, i) => (scale ? segClass(interp(scale, lo + ((i + 0.5) * (hi - lo)) / 10)) : 'n'));
   const p6 = pos(ind.value6m);
   const p30 = ind.present ? pos(ind.value30) : null;
-  const [main, unit] = meta.fmt(ind.value6m);
+  const [main, unit] = ind.display ?? meta.fmt(ind.value6m);   // display : prise de sang telle que saisie (« < 4 »)
   const endCls = c => (c[0] === 'w' ? 'is-bad' : c[0] === 'g' ? 'is-good' : '');
   const half = (txt, u) => Math.ceil((txt.length * 9 + (u ? u.length * 6.5 + 4 : 0)) / 2) + 2;
   const viz = h('span', { class: `viz${open ? ' is-open' : ''}` },
@@ -784,6 +851,7 @@ function renderAge() {
       m.official || m.provisional ? upcomingList(r, m) : null,
       paceSection(m, reveal), m.provisional ? null : callout(m),
       ...GROUPS.map(g => indSection(g, m)),
+      bloodSection(m),
       m.official || m.provisional ? leversSection(r) : null,
       trendSection(r.curve ?? []),
       note('Estimation personnelle, pas un avis médical.', 'page-foot'));
@@ -904,6 +972,68 @@ function indSection(g, m) {
   return h('section', { class: 'section ind-section', 'aria-labelledby': `sec-${g.key}` },
     secHead(g.title, `sec-${g.key}`, m.provisional && !m.recent ? 'avg' : true),
     h('div', { class: 'card ind-card' }, list.map(ind => indRow(ind, m))));
+}
+// Prise de sang : marqueurs comptés connus au jour affiché (valeurs des 12 derniers mois), du plus influent au moins
+// influent ; en sous-titre, les absents à demander au prochain bilan, dans le même ordre ; âge par organe.
+// Sans valeur, une invitation à saisir.
+const influence = id => calc.bloodInfluence(id);
+const byInfluence = (a, b) => influence(b.id ?? b) - influence(a.id ?? a);
+const influenceText = id => `±${dec1(influence(id))}${NBSP}${yearWord(influence(id))}`;
+// « a, b et c », sans majuscule (après deux-points).
+const joinFr = names => (names.length > 1 ? `${names.slice(0, -1).join(', ')} et ${names[names.length - 1]}` : names[0] ?? '');
+const COUNT_WORD = { 2: 'deux', 3: 'trois', 4: 'quatre', 5: 'cinq' };
+function bloodSection(m) {
+  const b = m.blood;
+  const known = (b?.items ?? []).filter(x => x.value !== null).sort(byInfluence);
+  const head = secHead('Prise de sang', 'sec-blood', false, b?.latest ? h('span', { class: 'sec-aside' }, `au ${dayMonthYear(b.latest)}`) : null);
+  if (!known.length) {
+    const any = blood.list.length > 0;
+    const top = [...calc.BLOOD_COUNTED].sort(byInfluence).slice(0, 3).map(id => IND[id].short);
+    return h('section', { class: 'section', 'aria-labelledby': 'sec-blood' }, head,
+      h('a', { class: 'card blood-cta', href: any ? '#sang' : '#bilan/nouveau' },
+        h('span', { class: 'list-icon' }, icon('drop')),
+        h('span', { class: 'list-main' },
+          h('span', { class: 'list-label' }, any ? 'Aucune prise de sang de moins de 12 mois' : 'Ajoute ta prise de sang'),
+          h('span', { class: 'list-sub' }, `${any ? 'Une prise de sang compte 12 mois.' : '9 analyses courantes affinent ton âge bio.'} Les plus influentes : ${joinFr(top)}.`)),
+        icon('next', 'list-chev')));
+  }
+  // Absents, du plus influent au moins influent (5 au plus) ; ceux qui pèsent plus que chacune des analyses présentes.
+  const missing = b.items.filter(x => x.value === null).sort(byInfluence);
+  const strongest = Math.max(...known.map(x => influence(x.id)));
+  const ahead = Math.min(5, missing.filter(x => influence(x.id) > strongest).length);
+  const next = missing.length
+    ? h('p', { class: 'blood-next' },
+      `À demander au prochain bilan, de la plus influente à la moins influente : ${joinFr(missing.slice(0, 5).map(x => `${IND[x.id].short} (${influenceText(x.id)})`))}${missing.length > 5 ? '…' : ''}.`,
+      ahead ? ` ${ahead === 1 ? 'La première pèse' : `Les ${COUNT_WORD[ahead] ?? ahead} premières pèsent`} plus que chacune de tes analyses actuelles.` : '')
+    : null;
+  return h('section', { class: 'section', 'aria-labelledby': 'sec-blood' }, head, next,
+    h('div', { class: 'card ind-card' }, known.map(x => bloodRow(x, m, b.latest))),
+    organsCard(b, m),
+    linkCta('Mes prises de sang', '#sang'));
+}
+function bloodRow(x, m, latest) {
+  const meta = IND[x.id];
+  const shown = labText(x.raw);
+  const ind = { id: x.id, present: x.present, estimated: false, value6m: x.value, value30: null, delta: x.delta, display: [shown, meta.unit] };
+  const label = `${meta.name} : ${shown} ${meta.unit}, prise de sang du ${dayMonthYear(x.date)}, ${x.present ? `impact ${signed1(x.delta)} ${yearWord(x.delta)} sur ton âge bio` : `non comptée, ${x.reason}`}`;
+  return h('div', { class: `ind-row is-static${x.present ? '' : ' is-absent'}`, role: 'group', 'aria-label': label },
+    h('div', { class: 'ind-head', 'aria-hidden': 'true' },
+      h('span', { class: 'ind-top' }, h('span', { class: 'ind-name' }, meta.name),
+        x.present ? null : chip('Non comptée'),
+        x.date !== latest ? h('span', { class: 'blood-date' }, dayMonthYear(x.date)) : null),
+      h('span', { class: 'ind-body' }, barViz(ind, ctxAt(m.civil)), impactEl(ind)),
+      x.present ? null : h('span', { class: 'ind-reason blood-reason' }, `${capital(x.reason)}.`)));
+}
+// Âge par organe : âge civil + impact des marqueurs de l'organe (classement de Levine 2018). Grossier.
+function organsCard(b, m) {
+  if (!b.systems.length || !finite(m.civil)) return null;
+  return h('div', { class: 'card organs' },
+    h('p', { class: 'card-title' }, 'Âge par organe'),
+    h('ul', { class: 'organ-list' }, b.systems.map(sy => h('li', { class: 'organ' },
+      h('span', { class: 'organ-main' }, h('span', { class: 'organ-name' }, sy.label), h('span', { class: 'organ-sub' }, sy.ids.map(id => IND[id].name).join(', '))),
+      h('span', { class: 'organ-age' }, h('b', { class: 'num' }, fmtAge(m.civil + sy.delta)), h('small', null, 'ans')),
+      h('span', { class: `organ-gap num ${impactCls(sy.delta)}` }, signed1(sy.delta))))),
+    note("Grossier : âge civil + impact des seules analyses de l'organe, une à quatre par organe."));
 }
 function leversSection(r) {
   const levers = (r.levers ?? []).filter(l => finite(l.gain) && l.gain > 0.05);
@@ -1316,6 +1446,168 @@ function renderTrend() {
         note('Lignes en gris : calibrage (moins de 90 jours valides dans la fenêtre).'))));
 }
 
+// ================= Prises de sang : suivi, saisie, sauvegarde =================
+
+function renderBlood() {
+  const list = blood.list;
+  const kids = [
+    topbar({ title: 'Prises de sang', sub: blood.demo ? 'Démonstration : rien n\'est gardé' : 'Gardées sur ce téléphone', back: true }),
+    h('p', { class: 'page-lede' }, "Dans la mémoire de l'app, sur ce téléphone : jamais envoyées, jamais dans le Diagnostic. 9 analyses courantes comptent dans ton âge bio pendant 12 mois ; les autres sont suivies."),
+    h('a', { class: 'btn btn-primary btn-block', href: '#bilan/nouveau' }, icon('plus'), 'Ajouter une prise de sang'),
+  ];
+  if (list.length) {
+    // Suivi : une ligne par analyse, une colonne par prise de sang (les 6 plus récentes).
+    const cols = list.slice(0, 6);
+    const rows = calc.CONFIG.BLOOD.filter(b => cols.some(c => c.valeurs[b.id] !== undefined));
+    const table = h('table', { class: 'data-table blood-table' },
+      h('caption', { class: 'visually-hidden' }, 'Valeurs de tes prises de sang, de la plus récente à la plus ancienne'),
+      h('thead', null, h('tr', null, h('th', { scope: 'col' }, 'Analyse'), cols.map(c => h('th', { scope: 'col' }, dayMonthYear(c.date))))),
+      h('tbody', null, rows.map(b => h('tr', { class: b.counted ? 'is-counted' : '' },
+        h('th', { scope: 'row' }, b.label, h('small', null, b.unit)),
+        cols.map(c => h('td', null, c.valeurs[b.id] !== undefined ? labText(c.valeurs[b.id]) : '—'))))));
+    kids.push(
+      h('section', { class: 'section', 'aria-labelledby': 'b-follow' },
+        secHead('Suivi', 'b-follow', false, h('span', { class: 'sec-aside' }, "en gras : compte dans l'âge bio")),
+        h('div', { class: 'card table-card' }, h('div', { class: 'scroll-x', tabindex: '0', role: 'region', 'aria-label': 'Tableau des prises de sang' }, table))),
+      h('section', { class: 'section', 'aria-labelledby': 'b-list' }, secHead('Historique', 'b-list'),
+        h('div', { class: 'card list' }, list.map(b => {
+          const n = Object.keys(b.valeurs).length;
+          const k = calc.BLOOD_COUNTED.filter(id => b.valeurs[id] !== undefined).length;
+          return h('a', { class: 'list-row', href: `#bilan/${b.date}` }, h('span', { class: 'list-icon' }, icon('drop')),
+            h('span', { class: 'list-main' }, h('span', { class: 'list-label' }, capital(dayMonthYear(b.date))),
+              h('span', { class: 'list-sub' }, `${plural(n, 'analyse')} · ${k} sur ${calc.BLOOD_COUNTED.length} pour l'âge bio`)),
+            icon('next', 'list-chev'));
+        }))));
+  } else {
+    kids.push(note('Aucune prise de sang pour l\'instant. Garde ton compte rendu sous la main : la saisie prend deux minutes.'));
+  }
+  kids.push(h('section', { class: 'section', 'aria-labelledby': 'b-save' }, secHead('Sauvegarde', 'b-save'),
+    h('div', { class: 'card' },
+      h('p', { class: 'card-text' }, "Effacer les données de Chrome ou désinstaller l'app efface tes prises de sang. Garde une copie dans un fichier, sur ton téléphone."),
+      h('button', { class: 'btn btn-secondary', type: 'button', 'data-action': 'blood-export', disabled: !list.length }, icon('download'), 'Sauvegarder dans un fichier'),
+      h('button', { class: 'btn btn-secondary', type: 'button', 'data-action': 'blood-import' }, icon('upload'), 'Restaurer un fichier'),
+      note('Fichier dans Téléchargements. Ne le dépose jamais en ligne ni dans le dossier du site.'))));
+  fill($('v-sang'), kids);
+}
+
+// Saisie : date, puis les analyses du compte rendu (toutes facultatives), dans l'ordre d'un laboratoire.
+function renderBilanForm(param) {
+  const editing = param === 'nouveau' ? null : blood.list.find(b => b.date === param) ?? null;
+  const today = clock.dayKey(Date.now());
+  const field = b => {
+    const id = `f-${b.id}`;
+    const v = editing?.valeurs?.[b.id];
+    return h('div', { class: 'field' },
+      h('label', { class: 'field-label', for: id }, h('span', null, b.label), b.counted ? h('span', { class: 'field-tag' }, 'âge bio') : null,
+        b.full ? h('small', null, b.full) : null),
+      h('span', { class: 'field-box' },
+        h('input', {
+          class: 'field-input num', id, name: b.id, type: 'text', inputmode: b.text ? 'text' : 'decimal', autocomplete: 'off',
+          autocapitalize: 'off', spellcheck: 'false', enterkeyhint: 'next', value: v !== undefined ? labText(v).replace(NBSP, ' ') : '',
+          placeholder: b.text ? 'ex. 2,1 ou < 5' : '', 'aria-describedby': `e-${b.id}`,
+        }),
+        h('span', { class: 'field-unit', 'aria-hidden': 'true' }, b.unit)),
+      h('p', { class: 'field-error', id: `e-${b.id}`, hidden: true }));
+  };
+  const sections = [...new Set(calc.CONFIG.BLOOD.map(b => b.section))];
+  const form = h('form', { class: 'blood-form', novalidate: true },
+    h('div', { class: 'card' },
+      h('div', { class: 'field' },
+        h('label', { class: 'field-label', for: 'f-date' }, 'Date du prélèvement'),
+        h('span', { class: 'field-box' }, h('input', { class: 'field-input', id: 'f-date', name: 'date', type: 'date', required: true, max: today, value: editing?.date ?? today, 'aria-describedby': 'e-date' })),
+        h('p', { class: 'field-error', id: 'e-date', hidden: true }))),
+    note("Remplis seulement ce qui figure sur ton compte rendu, dans l'unité indiquée ; « < 5 » est accepté. Les analyses marquées âge bio comptent dans ton âge bio."),
+    sections.map((sec, i) => h('div', { class: 'card field-set', role: 'group', 'aria-labelledby': `fs-${i}` },
+      h('p', { class: 'card-title', id: `fs-${i}` }, sec),
+      calc.CONFIG.BLOOD.filter(b => b.section === sec).map(field))),
+    h('p', { class: 'field-error form-error', id: 'e-form', hidden: true }),
+    h('button', { class: 'btn btn-primary btn-block', type: 'submit' }, 'Enregistrer'),
+    editing ? h('button', { class: 'btn btn-danger btn-block', type: 'button', 'data-action': 'blood-delete' }, 'Supprimer cette prise de sang') : null);
+  form.addEventListener('submit', e => {
+    e.preventDefault();
+    saveBilan(form, editing);
+  });
+  fill($('v-bilan'),
+    topbar({ title: editing ? 'Prise de sang' : 'Nouvelle prise de sang', sub: editing ? dayMonthYear(editing.date) : 'Gardée sur ce téléphone', back: true }),
+    form);
+}
+function saveBilan(form, editing) {
+  const errs = new Map();
+  const today = clock.dayKey(Date.now());
+  const date = form.elements.namedItem('date').value;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > today) errs.set('date', 'Choisis la date du prélèvement, aujourd\'hui ou avant.');
+  else if (blood.list.some(b => b.date === date && b !== editing)) errs.set('date', "Une prise de sang existe déjà à cette date : ouvre-la depuis l'historique.");
+  const valeurs = {};
+  for (const b of calc.CONFIG.BLOOD) {
+    const text = form.elements.namedItem(b.id).value.trim();
+    if (!text) continue;
+    const r = calc.checkLab(b.id, text);
+    if (r.error) errs.set(b.id, r.error);
+    else valeurs[b.id] = r.value;
+  }
+  if (!errs.size && !Object.keys(valeurs).length) errs.set('form', 'Saisis au moins une valeur.');
+  for (const el of form.querySelectorAll('.field-error')) el.hidden = true;
+  for (const el of form.querySelectorAll('[aria-invalid]')) el.removeAttribute('aria-invalid');
+  if (errs.size) {
+    for (const [id, msg] of errs) {
+      const el = $(`e-${id}`);
+      el.textContent = msg;
+      el.hidden = false;
+      $(`f-${id}`)?.setAttribute('aria-invalid', 'true');
+    }
+    const first = [...errs.keys()][0];
+    if (first === 'form') $('e-form').scrollIntoView({ block: 'center', behavior: calm() ? 'auto' : 'smooth' });
+    else $(`f-${first}`).focus();
+    toast(errs.size > 1 ? `${errs.size} champs à corriger.` : 'Un champ à corriger.', true);
+    return;
+  }
+  blood.list = calc.cleanBilans([...blood.list.filter(b => b !== editing), { date, valeurs }]);
+  const saved = bloodSave();
+  bloodChanged();
+  toast(!saved ? "Gardée jusqu'à la fermeture de l'app : le navigateur refuse l'enregistrement." : blood.demo ? "Démo : gardée jusqu'à la fermeture de l'app." : 'Prise de sang enregistrée sur ce téléphone.', !saved);
+  goBack('#sang');
+}
+function deleteBilan(date) {
+  const b = blood.list.find(x => x.date === date);
+  if (!b || !confirm(`Supprimer la prise de sang du ${dayMonthYear(date)} de ce téléphone ?`)) return;
+  blood.list = blood.list.filter(x => x !== b);
+  const saved = bloodSave();
+  bloodChanged();
+  toast(saved ? 'Prise de sang supprimée.' : "Suppression perdue à la fermeture : le navigateur refuse l'enregistrement.", !saved);
+  goBack('#sang');
+}
+// Sauvegarde : fichier JSON téléchargé sur le téléphone (rien n'est envoyé).
+function bloodExport() {
+  if (!blood.list.length) return;
+  const json = JSON.stringify({ app: 'Âge bio', v: 1, bilans: blood.list }, null, 2);
+  const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+  const a = h('a', { href: url, download: `prises-de-sang-${clock.dayKey(Date.now())}.json`, hidden: true });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+  toast('Sauvegarde enregistrée dans Téléchargements, sur ce téléphone.');
+}
+// Restauration : ajoute les prises de sang du fichier (même date : celle du fichier l'emporte).
+async function bloodImport(file) {
+  try {
+    if (file.size > 1e6) throw new Error('fichier trop gros');
+    let data;
+    try { data = JSON.parse(await file.text()); } catch { throw new Error('fichier illisible'); }
+    const incoming = calc.cleanBilans(Array.isArray(data) ? data : data?.bilans);
+    if (!incoming.length) throw new Error('aucune prise de sang lisible dans ce fichier');
+    const byDate = new Map(blood.list.map(b => [b.date, b]));
+    for (const b of incoming) byDate.set(b.date, b);
+    blood.list = calc.cleanBilans([...byDate.values()]);
+    const saved = bloodSave();
+    bloodChanged();
+    if (route?.screen === 'sang') renderBlood();
+    toast(saved ? `${plural(incoming.length, 'prise de sang restaurée', 'prises de sang restaurées')}.` : "Restaurées jusqu'à la fermeture de l'app : le navigateur refuse l'enregistrement.", !saved);
+  } catch (e) {
+    toast(`Restauration impossible : ${e?.message ?? e}.`, true);
+  }
+}
+
 // ================= Plus, Méthode, Diagnostic =================
 
 function renderPlus() {
@@ -1340,6 +1632,11 @@ function renderPlus() {
         ]),
         staleBanner(),
         h('button', { class: 'btn btn-secondary', type: 'button', 'data-action': 'pick' }, icon('upload'), 'Charger un autre export'))),
+    h('section', { class: 'section', 'aria-labelledby': 'p-blood' }, secHead('Prise de sang', 'p-blood'),
+      h('div', { class: 'card list' },
+        row('#sang', 'drop', 'Prises de sang', blood.list.length
+          ? `${plural(blood.list.length, 'enregistrée', 'enregistrées')} · gardées sur ce téléphone`
+          : 'Ajoute ton dernier bilan · gardé sur ce téléphone'))),
     h('section', { class: 'section', 'aria-labelledby': 'p-profile' }, secHead('Profil', 'p-profile'),
       h('details', { class: `card profile${profile.alert ? ' is-warn' : ''}` },
         h('summary', null, h('span', { class: 'list-icon' }, icon('lock')),
@@ -1363,7 +1660,7 @@ function renderPlus() {
           h('span', { class: 'list-main' }, h('span', { class: 'list-label' }, 'Démonstration'),
             h('span', { class: 'list-sub demo-links' }, h('a', { href: '?demo' }, 'complète'), ' · ', h('a', { href: '?demo=nouveau' }, 'nouveau'), ' · ', h('a', { href: '?demo=pause' }, 'en pause')))))),
     h('footer', { class: 'app-foot' },
-      h('p', null, `Âge bio ${APP_VERSION} · lu sur cet appareil, rien n'est envoyé ni conservé.`)));
+      h('p', null, `Âge bio ${APP_VERSION} · calculé sur cet appareil, rien n'est envoyé.`)));
 }
 function renderMethod() {
   const age = finite(state.data?.result?.civil) ? state.data.result.civil : 40;
@@ -1378,6 +1675,17 @@ function renderMethod() {
     const t = targetOf(id, ctx);
     const text = sc ? sc.map(([x, y]) => `${meta.x(x)} → ${signed1(y)}`).join(' ; ') : 'barème indisponible sans date de naissance';
     return h('li', null, h('strong', null, `${id} ${meta.name}`), ` : ${text}.`, finite(t) ? ` Neutre : ${valText(id, t)}.` : '', ' ', h('span', { class: 'muted' }, meta.src));
+  }));
+  // Prise de sang : barème de chaque marqueur compté (poids PhenoAge, neutre NHANES IV, bornes), du plus influent
+  // au moins influent.
+  const coefFmt = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 5 });
+  $('method-blood').replaceChildren(...[...calc.BLOOD_COUNTED].sort(byInfluence).map(id => {
+    const c = calc.bloodMarker(id).counted;
+    const meta = IND[id];
+    const sc = scaleOf(id, ctx);
+    const text = sc ? sc.map(([x, y]) => `${meta.x(x)} → ${signed1(y)}`).join(' ; ') : '';
+    const per = c.log ? 'par unité de ln(CRP)' : `par ${meta.unit}`;
+    return h('li', null, h('strong', null, meta.name), ` (${calc.CONFIG.BLOOD_SYSTEMS[c.system].toLowerCase()}, influence ${influenceText(id)}) : ${text}. Neutre : ${valText(id, c.neutral)} ; poids ${coefFmt.format(c.coef).replace('-', MINUS)} ${per}.`);
   }));
   const version = calc.CONFIG?.METHOD_VERSION ?? calc.CONFIG?.VERSION ?? null;
   $('method-version').textContent = `Âge bio ${APP_VERSION}${version ? ` · méthode ${version}` : ''} · constantes et sources dans CONFIG (calc.js).`;
@@ -1408,7 +1716,7 @@ const SHEETS = {
     const r = state.data?.result;
     const off = r?.official;
     const p = off ? null : r?.provisional;
-    const kids = [h('p', null, "Ton âge bio estime l'âge de ton corps d'après 8 indicateurs de sommeil, d'activité et de forme mesurés par ton bracelet. Chacun ajoute ou retire des années à ton âge civil.")];
+    const kids = [h('p', null, "Ton âge bio estime l'âge de ton corps d'après 8 indicateurs de sommeil, d'activité et de forme mesurés par ton bracelet, et d'après ta dernière prise de sang si tu l'as saisie. Chacun ajoute ou retire des années à ton âge civil.")];
     if (off) {
       kids.push(kvList([
         ['Âge bio', `${fmtAge(off.bio)} ans`], ['Âge civil', `${nf1.format(round1(off.civil))} ans`], ['Écart', `${signed1(off.gap)} ${yearWord(off.gap)}`],
@@ -1580,9 +1888,9 @@ function wireSheetDrag() {
 
 // ================= Navigation (routes par hash, History API) =================
 
-const SCREENS = ['synchro', 'aujourdhui', 'age', 'plus', 'indicateur', 'sommeil', 'tendance', 'methode', 'diagnostic'];
+const SCREENS = ['synchro', 'aujourdhui', 'age', 'plus', 'indicateur', 'sommeil', 'tendance', 'methode', 'diagnostic', 'sang', 'bilan'];
 const TABS = ['aujourdhui', 'age', 'plus'];
-const PARENT = { indicateur: 'age', sommeil: 'aujourdhui', tendance: 'age', methode: 'plus', diagnostic: 'plus' };
+const PARENT = { indicateur: 'age', sommeil: 'aujourdhui', tendance: 'age', methode: 'plus', diagnostic: 'plus', sang: 'plus', bilan: 'sang' };
 const scrollMemo = new Map();
 let route = null;
 let depthShown = 0;
@@ -1605,6 +1913,10 @@ function resolve({ screen, param, sheet }) {
   if (sc === 'indicateur') {
     p = IDS.includes(String(param).toUpperCase()) ? String(param).toUpperCase() : '';
     if (!p) sc = 'age';
+  }
+  if (sc === 'bilan') {
+    p = param === 'nouveau' || blood.list.some(b => b.date === param) ? param : '';
+    if (!p) sc = 'sang';
   }
   let sh = sheet && SHEETS[sheet] ? sheet : null;
   if (sh && !state.data && sh !== 'rythme' && sh !== 'sommeil') sh = null;
@@ -1648,6 +1960,8 @@ function renderScreen(r) {
     case 'tendance': renderTrend(); break;
     case 'methode': renderMethod(); break;
     case 'diagnostic': renderDiag(); break;
+    case 'sang': renderBlood(); break;
+    case 'bilan': renderBilanForm(r.param); break;
     default: break;
   }
 }
@@ -1783,7 +2097,7 @@ async function loadExport(file, { demo = null } = {}) {
     }
     let data;
     try {
-      data = readExport(db, clock, now);
+      data = readExport(db, clock, now, { bilans: blood.list });
     } catch (e) {
       throw Object.assign(e instanceof UserError ? e : new UserError(`Calcul impossible : ${e?.message ?? e}. Copie le diagnostic et transmets-le.`), { diag: true });
     }
@@ -1848,7 +2162,7 @@ function renderAll() {
   renderPlus();
   renderMethod();
   renderDiag();
-  if (route && ['indicateur', 'sommeil', 'tendance'].includes(route.screen)) renderScreen(route);
+  if (route && ['indicateur', 'sommeil', 'tendance', 'sang'].includes(route.screen)) renderScreen(route);
 }
 let toastTimer = 0;
 function toast(text, isError = false) {
@@ -1880,6 +2194,11 @@ function wire() {
     const file = input.files?.[0];
     if (file) loadExport(file).finally(() => { input.value = ''; });   // permet de recharger le même fichier
   });
+  $('file-blood').addEventListener('change', e => {
+    const input = e.target;
+    const file = input.files?.[0];
+    if (file) bloodImport(file).finally(() => { input.value = ''; });
+  });
   document.addEventListener('click', e => {
     const t = e.target.closest('[data-back],[data-sheet],[data-close],[data-week],[data-scroll],[data-action],a[href^="#"]');
     if (!t) return;
@@ -1909,6 +2228,15 @@ function wire() {
     } else if (t.matches('[data-action="pick"]')) {
       e.preventDefault();
       pickFile();
+    } else if (t.matches('[data-action="blood-export"]')) {
+      e.preventDefault();
+      bloodExport();
+    } else if (t.matches('[data-action="blood-import"]')) {
+      e.preventDefault();
+      $('file-blood').click();
+    } else if (t.matches('[data-action="blood-delete"]')) {
+      e.preventDefault();
+      deleteBilan(route?.param);
     } else {
       e.preventDefault();
       const href = t.getAttribute('href');
@@ -1941,6 +2269,7 @@ function wire() {
 
 function boot() {
   history.scrollRestoration = 'manual';
+  bloodLoad();
   wire();
   $('sync-go').disabled = false;
   syncMode('idle');
